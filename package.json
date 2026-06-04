@@ -1,7 +1,7 @@
 {
   "name": "@testingbot/automation-mcp",
   "version": "0.1.0",
-  "description": "MCP server that lets AI agents drive remote browsers (and, later, real mobile devices) on TestingBot's grid.",
+  "description": "MCP server that lets AI agents drive remote browsers and devices on TestingBot's grid.",
   "type": "module",
   "main": "dist/register.js",
   "types": "dist/register.d.ts",
