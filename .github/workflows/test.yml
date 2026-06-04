@@ -1,0 +1,51 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR branch).
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines.node is >=18; cover the supported majors.
+        node-version: [18, 20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      # Bundling appium-mcp pulls in a few hundred MB of native drivers, so the
+      # install is heavier than a typical MCP server. npm cache (above) helps.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      # Unit tests only — tests/integration is excluded by vitest.config.ts and
+      # never runs here (it would open real, paid TestingBot sessions).
+      - name: Test
+        run: npm test
+
+      # Just the type-check/compile — lint, format, and tests already ran above
+      # as discrete steps (npm run build would re-run all of them).
+      - name: Build (tsc)
+        run: npx tsc
