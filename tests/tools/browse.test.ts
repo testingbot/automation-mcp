@@ -152,6 +152,41 @@ describe("Browser tools", () => {
     expect(result.content[0].text).toContain("Android 14");
   });
 
+  it("tb_openBrowser defaults a mobile session to an emulator/simulator", async () => {
+    const result = await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "Android",
+      deviceName: "Google Pixel 9",
+      platformVersion: "15",
+    });
+    const call = (mockNewSession as any).mock.calls.at(-1)[0];
+    expect(call.capabilities["tb:options"].realDevice).toBeUndefined();
+    expect(result.content[0].text).toContain("emulator/simulator");
+  });
+
+  it("tb_openBrowser sets tb:options.realDevice when realDevice is requested", async () => {
+    const result = await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "Android",
+      deviceName: "Google Pixel 9",
+      platformVersion: "15",
+      realDevice: true,
+    });
+    const call = (mockNewSession as any).mock.calls.at(-1)[0];
+    expect(call.capabilities["tb:options"].realDevice).toBe(true);
+    expect(result.content[0].text).toContain("real device");
+  });
+
+  it("tb_openBrowser ignores realDevice for desktop sessions", async () => {
+    await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "WIN11",
+      realDevice: true,
+    });
+    const call = (mockNewSession as any).mock.calls.at(-1)[0];
+    expect(call.capabilities["tb:options"].realDevice).toBeUndefined();
+  });
+
   it("tb_openBrowser picks XCUITest when the mobile platform is iOS", async () => {
     await tools.tb_openBrowser.handler({
       browserName: "Safari",

@@ -119,7 +119,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_openBrowser = server.tool(
     "tb_openBrowser",
-    "Start a remote browser session on TestingBot via WebDriver. Handles BOTH desktop browsers (Chrome/Edge/Safari/Firefox on Win/macOS/Linux) AND mobile browsers (Chrome on Android, Safari on iOS) on real TestingBot devices. For a mobile browser task, set `deviceName` and `platformVersion` — the session is still WebDriver/chromedriver-backed, so tb_navigate / tb_snapshot / tb_screenshot / tb_click work directly with no native-context juggling. **Prefer this over appium_session_management for any task whose goal is loading a web page in a browser**, even on mobile. Reserve appium_session_management for native-app testing (.apk/.ipa). Returns a sessionId for subsequent tool calls and a liveViewUrl the human can open to watch the agent drive in real time. Burns TestingBot minutes — call tb_closeBrowser when done.",
+    "Start a remote browser session on TestingBot via WebDriver. Handles BOTH desktop browsers (Chrome/Edge/Safari/Firefox on Win/macOS/Linux) AND mobile browsers (Chrome on Android, Safari on iOS). For a mobile browser task, set `deviceName` and `platformVersion` — the session is still WebDriver/chromedriver-backed, so tb_navigate / tb_snapshot / tb_screenshot / tb_click work directly with no native-context juggling. By default a mobile session runs on an EMULATOR (Android) / SIMULATOR (iOS); set `realDevice: true` to run on a physical device instead — ALWAYS do this when the user asks for a 'real device', 'physical device', or 'real hardware'. **Prefer this over appium_session_management for any task whose goal is loading a web page in a browser**, even on mobile. Reserve appium_session_management for native-app testing (.apk/.ipa). Returns a sessionId for subsequent tool calls and a liveViewUrl the human can open to watch the agent drive in real time. Burns TestingBot minutes — call tb_closeBrowser when done.",
     {
       browserName: z
         .enum(["chrome", "firefox", "edge", "safari", "Chrome", "Firefox", "Edge", "Safari"])
@@ -152,6 +152,13 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         .describe(
           "Mobile automation engine override. Defaults: 'UiAutomator2' for Android, 'XCUITest' for iOS. Only set this if you have a specific reason."
         ),
+      realDevice: z
+        .boolean()
+        .optional()
+        .default(false)
+        .describe(
+          "Run on a physical device instead of an emulator/simulator (mobile only). Set true whenever the user asks for a 'real device' or 'physical device'. Ignored for desktop."
+        ),
       name: z.string().optional().describe("Human-readable session name (shown in dashboard)"),
       build: z.string().optional().describe("Build identifier for grouping"),
       screenResolution: z
@@ -168,6 +175,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
       deviceName?: string;
       platformVersion?: string;
       automationName?: string;
+      realDevice?: boolean;
       name?: string;
       build?: string;
       screenResolution?: string;
@@ -187,6 +195,9 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         if (args.name) tbOpts.name = args.name;
         if (args.build) tbOpts.build = args.build;
         if (!isMobile && args.screenResolution) tbOpts.screenResolution = args.screenResolution;
+        // Physical-device targeting (mobile only). TestingBot defaults to an
+        // emulator/simulator unless realDevice is set in tb:options.
+        if (isMobile && args.realDevice) tbOpts.realDevice = true;
 
         // W3C WebDriver capabilities + TestingBot-specific options.
         // - Desktop: legacy `platform` + W3C `platformName` so codes like
@@ -248,8 +259,9 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
           },
         });
 
+        const deviceKind = args.realDevice ? "real device" : "emulator/simulator";
         const deviceLine = isMobile
-          ? `- **Device**: ${args.deviceName}${args.platformVersion ? ` (${args.platform} ${args.platformVersion})` : ` (${args.platform})`}\n`
+          ? `- **Device**: ${args.deviceName}${args.platformVersion ? ` (${args.platform} ${args.platformVersion})` : ` (${args.platform})`} — ${deviceKind}\n`
           : `- **Browser**: ${browserName} ${browserVersion} on ${args.platform}\n`;
         const browserLine = isMobile ? `- **Browser**: ${browserName}\n` : "";
 
