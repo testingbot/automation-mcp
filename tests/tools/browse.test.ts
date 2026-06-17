@@ -204,7 +204,7 @@ describe("Browser tools", () => {
     expect(result.content[0].text).toContain("real device");
   });
 
-  it("tb_openBrowser suggests alternatives and starts no session when the real device is unavailable", async () => {
+  it("tb_openBrowser suggests alternatives and starts no session when the exact device+version is busy", async () => {
     testingBotApi.getDevices = vi.fn().mockResolvedValue([
       { name: "Pixel 9", platform_name: "Android", version: "15", available: false },
       { name: "Pixel 8", platform_name: "Android", version: "14", available: true },
@@ -220,9 +220,77 @@ describe("Browser tools", () => {
     expect(mockNewSession).not.toHaveBeenCalled();
     const text = result.content[0].text;
     expect(text).toContain("No session was started");
-    expect(text).toContain("unavailable");
+    expect(text).toContain("busy");
     expect(text).toContain("Pixel 8"); // same-platform available alternative
     expect(text).not.toContain("iPhone 15"); // different platform filtered out
+  });
+
+  it("tb_openBrowser reports a version mismatch (no fallback) when the OS version isn't offered", async () => {
+    // Pixel 9 only exists on Android 16; requesting 15 must NOT silently run on 16
+    // (the hub would time out). It should list the offered versions instead.
+    testingBotApi.getDevices = vi
+      .fn()
+      .mockResolvedValue([
+        { name: "Pixel 9", platform_name: "Android", version: "16", available: true },
+      ]);
+    const result = await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "Android",
+      deviceName: "Google Pixel 9",
+      platformVersion: "15",
+      realDevice: true,
+    });
+    expect(mockNewSession).not.toHaveBeenCalled();
+    const text = result.content[0].text;
+    expect(text).toContain("not offered on Android 15");
+    expect(text).toContain("Pixel 9 16 (available)");
+  });
+
+  it("tb_openBrowser treats version 16.0 and catalog 16 as the same version", async () => {
+    testingBotApi.getDevices = vi
+      .fn()
+      .mockResolvedValue([
+        { name: "Pixel 9", platform_name: "Android", version: "16", available: true },
+      ]);
+    await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "Android",
+      deviceName: "Google Pixel 9",
+      platformVersion: "16.0",
+      realDevice: true,
+    });
+    expect(mockNewSession).toHaveBeenCalledOnce();
+  });
+
+  it("tb_openBrowser coerces a stringified realDevice:'true' into a real-device session", async () => {
+    testingBotApi.getDevices = vi
+      .fn()
+      .mockResolvedValue([
+        { name: "Pixel 9", platform_name: "Android", version: "15", available: true },
+      ]);
+    const result = await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "Android",
+      deviceName: "Google Pixel 9",
+      platformVersion: "15",
+      realDevice: "true",
+    });
+    const call = (mockNewSession as any).mock.calls.at(-1)[0];
+    expect(call.capabilities["tb:options"].realDevice).toBe(true);
+    expect(result.content[0].text).toContain("real device");
+  });
+
+  it("tb_openBrowser treats stringified realDevice:'false' as an emulator (not a real device)", async () => {
+    const result = await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "Android",
+      deviceName: "Google Pixel 9",
+      platformVersion: "15",
+      realDevice: "false",
+    });
+    const call = (mockNewSession as any).mock.calls.at(-1)[0];
+    expect(call.capabilities["tb:options"].realDevice).toBeUndefined();
+    expect(result.content[0].text).toContain("emulator/simulator");
   });
 
   it("tb_openBrowser proceeds when the availability check itself fails", async () => {

@@ -103,13 +103,31 @@ const normalizeDeviceToken = (s: unknown): string =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
+// Compare OS versions leniently so "16", "16.0" and "16.0.0" are equal — agents
+// (and humans) write them inconsistently and an exact string compare would treat
+// a correct version as a mismatch.
+const normalizeVersion = (s: unknown): string =>
+  String(s ?? "")
+    .trim()
+    .replace(/(\.0+)+$/, "");
+
+// Parse a possibly-stringified boolean. MCP clients sometimes serialize booleans
+// as the strings "true"/"false"; a bare truthiness check would treat "false" as
+// true. Returns true only for real true / "true".
+function parseBoolish(v: unknown): boolean {
+  return v === true || String(v).trim().toLowerCase() === "true";
+}
+
 /**
  * Pre-flight check for a requested PHYSICAL device. The /devices catalog carries
- * an `available` flag, so before we open a real-device session (and burn minutes
- * or sit in a queue) we confirm the device exists and is free. Returns a guidance
- * message to show the user when it is NOT bookable, or `null` when we should
- * proceed (device available, or we couldn't verify — never block on our own
- * inability to check). Best-effort and non-fatal by design.
+ * a `platform_name`, `version` and `available` flag per device, so before opening
+ * a real-device session (which burns minutes / sits in a queue / times out at the
+ * hub if the exact device+version isn't offered) we confirm it's actually
+ * bookable. Returns a guidance message to show the user when it is NOT — covering
+ * three distinct cases: the OS version isn't offered for that device, the exact
+ * device+version is busy, or the device isn't in the catalog at all. Returns
+ * `null` when we should proceed (a matching, available entry exists, or we
+ * couldn't verify — we never block on our own inability to check).
  */
 async function realDeviceUnavailableMessage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -131,20 +149,15 @@ async function realDeviceUnavailableMessage(
 
   const wantName = normalizeDeviceToken(deviceName);
   const wantPlatform = normalizeDeviceToken(platform);
+  const wantVersion = platformVersion ? normalizeVersion(platformVersion) : "";
+  if (!wantName) return null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nameMatches = (d: any): boolean => {
     const n = normalizeDeviceToken(d.name);
-    return !!n && !!wantName && (n === wantName || n.includes(wantName) || wantName.includes(n));
+    return !!n && (n === wantName || n.includes(wantName) || wantName.includes(n));
   };
 
   const byName = devices.filter(nameMatches);
-  const byNameVersion = platformVersion
-    ? byName.filter((d) => String(d.version) === String(platformVersion))
-    : byName;
-  const pool = byNameVersion.length ? byNameVersion : byName;
-
-  // Found a matching entry that's free → proceed.
-  if (pool.some((d) => d.available)) return null;
 
   const alternatives = devices
     .filter(
@@ -153,28 +166,73 @@ async function realDeviceUnavailableMessage(
     )
     .slice(0, 8)
     .map((d) => `  - ${d.name} (${d.platform_name} ${d.version})`);
-
   const target = `${deviceName}${platformVersion ? ` (${platform} ${platformVersion})` : ` (${platform})`}`;
-  const reason = pool.length
-    ? "is currently unavailable"
-    : "was not found in the real-device catalog";
+  const emulatorOpt =
+    "- Run on an emulator/simulator instead: call tb_openBrowser again with realDevice:false (or omit it).";
 
-  const lines = [
+  // Case 1: name not in the real-device catalog at all.
+  if (byName.length === 0) {
+    const lines = [
+      "No session was started.",
+      "",
+      `The requested real device "${target}" was not found in the real-device catalog.`,
+      "",
+      "Options:",
+      emulatorOpt,
+    ];
+    if (alternatives.length) {
+      lines.push("- Use one of these available real devices:", ...alternatives);
+    } else {
+      lines.push("- Call getDevices to see the current real-device catalog.");
+    }
+    return lines.join("\n");
+  }
+
+  // Case 2: device exists but the requested OS version isn't offered for it.
+  // Do NOT fall back to another version — the hub would just time out. Tell the
+  // caller exactly which versions this device IS offered on (so the agent stops
+  // guessing) and which are available now.
+  if (wantVersion) {
+    const exact = byName.filter((d) => normalizeVersion(d.version) === wantVersion);
+    if (exact.length === 0) {
+      const offered = byName
+        .map((d) => `  - ${d.name} ${d.version}${d.available ? " (available)" : " (busy)"}`)
+        .slice(0, 12);
+      return [
+        "No session was started.",
+        "",
+        `"${deviceName}" is not offered on ${platform} ${platformVersion}. Pick a version it actually runs, and don't guess — use one of these:`,
+        ...offered,
+        "",
+        "Retry tb_openBrowser with platformVersion set to one of the versions above (prefer one marked available).",
+      ].join("\n");
+    }
+    if (exact.some((d) => d.available)) return null; // exact match, free → proceed
+    // exact version exists but is busy
+    return [
+      "No session was started.",
+      "",
+      `The requested real device "${target}" is currently busy on TestingBot.`,
+      "",
+      "Options:",
+      "- Wait a little and retry — real devices free up as other tests finish.",
+      emulatorOpt,
+      ...(alternatives.length ? ["- Use a similar available real device:", ...alternatives] : []),
+    ].join("\n");
+  }
+
+  // Case 3: no version requested — proceed if any matching entry is free.
+  if (byName.some((d) => d.available)) return null;
+  return [
     "No session was started.",
     "",
-    `The requested real device "${target}" ${reason} on TestingBot.`,
+    `The requested real device "${target}" is currently busy on TestingBot.`,
     "",
     "Options:",
     "- Wait a little and retry — real devices free up as other tests finish.",
-    "- Run on an emulator/simulator instead: call tb_openBrowser again with realDevice:false (or omit it).",
-  ];
-  if (alternatives.length) {
-    lines.push("- Use a similar available real device:");
-    lines.push(...alternatives);
-  } else {
-    lines.push("- Call getDevices to see the current real-device catalog and availability.");
-  }
-  return lines.join("\n");
+    emulatorOpt,
+    ...(alternatives.length ? ["- Use a similar available real device:", ...alternatives] : []),
+  ].join("\n");
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -269,6 +327,9 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         const browserName = args.browserName.toLowerCase();
         const browserVersion = args.browserVersion || "latest";
         const isMobile = !!args.deviceName;
+        // Coerce realDevice: args reach the handler unvalidated, and some MCP
+        // clients send booleans as the strings "true"/"false".
+        const realDevice = isMobile && parseBoolish(args.realDevice);
 
         const tbOpts: Record<string, unknown> = {};
         if (args.name) tbOpts.name = args.name;
@@ -276,7 +337,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         if (!isMobile && args.screenResolution) tbOpts.screenResolution = args.screenResolution;
         // Physical-device targeting (mobile only). TestingBot defaults to an
         // emulator/simulator unless realDevice is set in tb:options.
-        if (isMobile && args.realDevice) tbOpts.realDevice = true;
+        if (realDevice) tbOpts.realDevice = true;
 
         // W3C WebDriver capabilities + TestingBot-specific options.
         // - Desktop: legacy `platform` + W3C `platformName` so codes like
@@ -308,7 +369,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         // Real-device pre-flight: if the requested physical device isn't bookable,
         // return guidance (wait / emulator / similar device) instead of opening a
         // doomed session that would queue or fail.
-        if (isMobile && args.realDevice) {
+        if (realDevice) {
           const unavailable = await realDeviceUnavailableMessage(
             testingBotApi,
             args.deviceName as string,
@@ -353,7 +414,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
           },
         });
 
-        const deviceKind = args.realDevice ? "real device" : "emulator/simulator";
+        const deviceKind = realDevice ? "real device" : "emulator/simulator";
         const deviceLine = isMobile
           ? `- **Device**: ${args.deviceName}${args.platformVersion ? ` (${args.platform} ${args.platformVersion})` : ` (${args.platform})`} — ${deviceKind}\n`
           : `- **Browser**: ${browserName} ${browserVersion} on ${args.platform}\n`;
