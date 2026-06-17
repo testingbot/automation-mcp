@@ -187,6 +187,57 @@ describe("Browser tools", () => {
     expect(call.capabilities["tb:options"].realDevice).toBeUndefined();
   });
 
+  it("tb_openBrowser opens a real-device session when the device is available", async () => {
+    testingBotApi.getDevices = vi
+      .fn()
+      .mockResolvedValue([
+        { name: "Pixel 9", platform_name: "Android", version: "15", available: true },
+      ]);
+    const result = await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "Android",
+      deviceName: "Google Pixel 9",
+      platformVersion: "15",
+      realDevice: true,
+    });
+    expect(mockNewSession).toHaveBeenCalledOnce();
+    expect(result.content[0].text).toContain("real device");
+  });
+
+  it("tb_openBrowser suggests alternatives and starts no session when the real device is unavailable", async () => {
+    testingBotApi.getDevices = vi.fn().mockResolvedValue([
+      { name: "Pixel 9", platform_name: "Android", version: "15", available: false },
+      { name: "Pixel 8", platform_name: "Android", version: "14", available: true },
+      { name: "iPhone 15", platform_name: "iOS", version: "17", available: true },
+    ]);
+    const result = await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "Android",
+      deviceName: "Google Pixel 9",
+      platformVersion: "15",
+      realDevice: true,
+    });
+    expect(mockNewSession).not.toHaveBeenCalled();
+    const text = result.content[0].text;
+    expect(text).toContain("No session was started");
+    expect(text).toContain("unavailable");
+    expect(text).toContain("Pixel 8"); // same-platform available alternative
+    expect(text).not.toContain("iPhone 15"); // different platform filtered out
+  });
+
+  it("tb_openBrowser proceeds when the availability check itself fails", async () => {
+    testingBotApi.getDevices = vi.fn().mockRejectedValue(new Error("devices API down"));
+    const result = await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "Android",
+      deviceName: "Google Pixel 9",
+      platformVersion: "15",
+      realDevice: true,
+    });
+    expect(mockNewSession).toHaveBeenCalledOnce();
+    expect(result.content[0].text).toContain("real device");
+  });
+
   it("tb_openBrowser picks XCUITest when the mobile platform is iOS", async () => {
     await tools.tb_openBrowser.handler({
       browserName: "Safari",

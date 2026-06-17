@@ -98,6 +98,85 @@ async function findOne(driver: any, by: LocatorBy, value: string): Promise<strin
   return id;
 }
 
+const normalizeDeviceToken = (s: unknown): string =>
+  String(s ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+/**
+ * Pre-flight check for a requested PHYSICAL device. The /devices catalog carries
+ * an `available` flag, so before we open a real-device session (and burn minutes
+ * or sit in a queue) we confirm the device exists and is free. Returns a guidance
+ * message to show the user when it is NOT bookable, or `null` when we should
+ * proceed (device available, or we couldn't verify — never block on our own
+ * inability to check). Best-effort and non-fatal by design.
+ */
+async function realDeviceUnavailableMessage(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  testingBotApi: any,
+  deviceName: string,
+  platform: string,
+  platformVersion?: string
+): Promise<string | null> {
+  if (!testingBotApi || typeof testingBotApi.getDevices !== "function") return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let devices: any[];
+  try {
+    devices = await testingBotApi.getDevices();
+  } catch (err) {
+    logger.warn({ err }, "Could not fetch device list for real-device availability check");
+    return null;
+  }
+  if (!Array.isArray(devices)) return null;
+
+  const wantName = normalizeDeviceToken(deviceName);
+  const wantPlatform = normalizeDeviceToken(platform);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nameMatches = (d: any): boolean => {
+    const n = normalizeDeviceToken(d.name);
+    return !!n && !!wantName && (n === wantName || n.includes(wantName) || wantName.includes(n));
+  };
+
+  const byName = devices.filter(nameMatches);
+  const byNameVersion = platformVersion
+    ? byName.filter((d) => String(d.version) === String(platformVersion))
+    : byName;
+  const pool = byNameVersion.length ? byNameVersion : byName;
+
+  // Found a matching entry that's free → proceed.
+  if (pool.some((d) => d.available)) return null;
+
+  const alternatives = devices
+    .filter(
+      (d) =>
+        d.available && (!wantPlatform || normalizeDeviceToken(d.platform_name) === wantPlatform)
+    )
+    .slice(0, 8)
+    .map((d) => `  - ${d.name} (${d.platform_name} ${d.version})`);
+
+  const target = `${deviceName}${platformVersion ? ` (${platform} ${platformVersion})` : ` (${platform})`}`;
+  const reason = pool.length
+    ? "is currently unavailable"
+    : "was not found in the real-device catalog";
+
+  const lines = [
+    "No session was started.",
+    "",
+    `The requested real device "${target}" ${reason} on TestingBot.`,
+    "",
+    "Options:",
+    "- Wait a little and retry — real devices free up as other tests finish.",
+    "- Run on an emulator/simulator instead: call tb_openBrowser again with realDevice:false (or omit it).",
+  ];
+  if (alternatives.length) {
+    lines.push("- Use a similar available real device:");
+    lines.push(...alternatives);
+  } else {
+    lines.push("- Call getDevices to see the current real-device catalog and availability.");
+  }
+  return lines.join("\n");
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export default function addBrowseTools(server: any, testingBotApi: any, sessions: SessionManager) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -157,7 +236,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         .optional()
         .default(false)
         .describe(
-          "Run on a physical device instead of an emulator/simulator (mobile only). Set true whenever the user asks for a 'real device' or 'physical device'. Ignored for desktop."
+          "Run on a physical device instead of an emulator/simulator (mobile only). Set true whenever the user asks for a 'real device' or 'physical device'. Ignored for desktop. If the requested physical device is unavailable, this tool returns (without starting a session) a list of available alternatives plus the option to wait or use an emulator — relay those choices to the user."
         ),
       name: z.string().optional().describe("Human-readable session name (shown in dashboard)"),
       build: z.string().optional().describe("Build identifier for grouping"),
@@ -225,6 +304,21 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
               platform: args.platform,
               "tb:options": tbOpts,
             };
+
+        // Real-device pre-flight: if the requested physical device isn't bookable,
+        // return guidance (wait / emulator / similar device) instead of opening a
+        // doomed session that would queue or fail.
+        if (isMobile && args.realDevice) {
+          const unavailable = await realDeviceUnavailableMessage(
+            testingBotApi,
+            args.deviceName as string,
+            args.platform,
+            args.platformVersion
+          );
+          if (unavailable) {
+            return { content: [{ type: "text", text: unavailable }] };
+          }
+        }
 
         logger.info({ capabilities, mobile: isMobile }, "Opening browser session");
 
