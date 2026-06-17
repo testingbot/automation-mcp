@@ -256,7 +256,9 @@ describe("Browser tools", () => {
       value: "button#go",
       timeoutMs: 1000,
     });
-    expect(fakeDriver.setTimeouts).toHaveBeenCalledWith({ implicit: 1000 });
+    // setTimeouts is the positional W3C protocol command (implicit, pageLoad,
+    // script) — passing an object made the hub reject it ("implicit: object").
+    expect(fakeDriver.setTimeouts).toHaveBeenCalledWith(1000);
     expect(fakeDriver.findElement).toHaveBeenCalledWith("css selector", "button#go");
     expect(fakeDriver.elementClick).toHaveBeenCalledWith("element-99");
     expect(result.content[0].text).toBe("Clicked css=button#go");

@@ -424,7 +424,11 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
       try {
         const session = sessions.touchAs(sanitizeSessionId(args.sessionId), "browser");
         const by = args.by ?? "css";
-        await session.driver.setTimeouts({ implicit: args.timeoutMs ?? 5000 });
+        // setTimeouts is the low-level W3C protocol command: positional
+        // (implicit, pageLoad, script), each number|null — NOT an object. Passing
+        // an object makes `implicit` an object and the hub rejects it. Set only
+        // implicit; leaving pageLoad/script undefined keeps the session defaults.
+        await session.driver.setTimeouts(args.timeoutMs ?? 5000);
         const elementId = await findOne(session.driver, by, args.value);
         await session.driver.elementClick(elementId);
         return {
@@ -461,7 +465,8 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
       try {
         const session = sessions.touchAs(sanitizeSessionId(args.sessionId), "browser");
         const by = args.by ?? "css";
-        await session.driver.setTimeouts({ implicit: 5000 });
+        // Positional (implicit, pageLoad, script) — see tb_click for the rationale.
+        await session.driver.setTimeouts(5000);
         const elementId = await findOne(session.driver, by, args.value);
 
         if (args.clearFirst !== false) {
@@ -508,7 +513,11 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
     async (args: { sessionId: string; by?: LocatorBy; value: string; timeoutMs?: number }) => {
       try {
         const session = sessions.touchAs(sanitizeSessionId(args.sessionId), "browser");
-        await session.driver.setTimeouts({ implicit: args.timeoutMs ?? 5000 });
+        // setTimeouts is the low-level W3C protocol command: positional
+        // (implicit, pageLoad, script), each number|null — NOT an object. Passing
+        // an object makes `implicit` an object and the hub rejects it. Set only
+        // implicit; leaving pageLoad/script undefined keeps the session defaults.
+        await session.driver.setTimeouts(args.timeoutMs ?? 5000);
         const elementId = await findOne(session.driver, args.by ?? "css", args.value);
         const text = (await session.driver.getElementText(elementId)) as string;
         return { content: [{ type: "text", text: text ?? "" }] };
@@ -547,7 +556,11 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
     }) => {
       try {
         const session = sessions.touchAs(sanitizeSessionId(args.sessionId), "browser");
-        await session.driver.setTimeouts({ implicit: args.timeoutMs ?? 5000 });
+        // setTimeouts is the low-level W3C protocol command: positional
+        // (implicit, pageLoad, script), each number|null — NOT an object. Passing
+        // an object makes `implicit` an object and the hub rejects it. Set only
+        // implicit; leaving pageLoad/script undefined keeps the session defaults.
+        await session.driver.setTimeouts(args.timeoutMs ?? 5000);
         const elementId = await findOne(session.driver, args.by ?? "css", args.value);
         const value = await session.driver.getElementAttribute(elementId, args.attribute);
         return {

@@ -12,21 +12,18 @@
  * the returned handle before serving its first tools/list response, otherwise
  * the mobile tool surface won't be visible to the client.
  */
+// MUST be first: sets WDIO_LOG_LEVEL before `./tools/browse.js` pulls in
+// `webdriver`, which creates its logger (and caches its level) at module load.
+// Defense-in-depth so a host embedding this library over stdio is protected even
+// if it didn't set the level itself. See the module for the ESM-hoisting detail.
+import "./silence-wdio.js";
+
 import addBrowseTools from "./tools/browse.js";
 import addSharedTools from "./tools/shared.js";
 import addAppiumProxyTools, { type AppiumProxyHandle } from "./tools/appium-proxy.js";
 import { SessionManager, type SessionManagerOptions } from "./session-manager.js";
 import type { TestingBotConfig, AutomationOptions } from "./lib/types.js";
 import logger from "./lib/logger.js";
-
-// Defense-in-depth for embedders: these tools open WebDriver sessions via the
-// `webdriver` package, whose @wdio/logger defaults to INFO on stdout. When this
-// library is composed into a host that speaks stdio JSON-RPC, those logs corrupt
-// the protocol stream. The host should ideally set this, but enforce a safe
-// default here too (never overriding an explicit level). @wdio/logger reads
-// WDIO_LOG_LEVEL lazily at getLogger()/newSession() time, so setting it at module
-// load — well before any session is created — is sufficient.
-process.env.WDIO_LOG_LEVEL = process.env.WDIO_LOG_LEVEL || "silent";
 
 export type { AutomationOptions, TestingBotConfig };
 export { SessionManager };
