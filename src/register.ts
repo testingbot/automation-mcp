@@ -19,6 +19,15 @@ import { SessionManager, type SessionManagerOptions } from "./session-manager.js
 import type { TestingBotConfig, AutomationOptions } from "./lib/types.js";
 import logger from "./lib/logger.js";
 
+// Defense-in-depth for embedders: these tools open WebDriver sessions via the
+// `webdriver` package, whose @wdio/logger defaults to INFO on stdout. When this
+// library is composed into a host that speaks stdio JSON-RPC, those logs corrupt
+// the protocol stream. The host should ideally set this, but enforce a safe
+// default here too (never overriding an explicit level). @wdio/logger reads
+// WDIO_LOG_LEVEL lazily at getLogger()/newSession() time, so setting it at module
+// load — well before any session is created — is sufficient.
+process.env.WDIO_LOG_LEVEL = process.env.WDIO_LOG_LEVEL || "silent";
+
 export type { AutomationOptions, TestingBotConfig };
 export { SessionManager };
 

@@ -1,5 +1,14 @@
 #!/usr/bin/env node
 
+// webdriver (via @wdio/logger) defaults to level "info" and writes those logs to
+// process.stdout. For a stdio MCP server, stdout is reserved exclusively for
+// JSON-RPC framing, so any stray webdriver log line corrupts the protocol stream
+// (the client throws "Unexpected non-whitespace character after JSON"). Silence it
+// before any import can create a wdio logger. @wdio/logger reads WDIO_LOG_LEVEL
+// lazily at getLogger() time, but setting it above the imports guarantees it's in
+// place; an operator can still override it.
+process.env.WDIO_LOG_LEVEL = process.env.WDIO_LOG_LEVEL || "silent";
+
 import { createRequire } from "module";
 import { getConfig } from "./config.js";
 import { AutomationMcpServer } from "./server-factory.js";
