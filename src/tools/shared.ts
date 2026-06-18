@@ -1,6 +1,21 @@
 import { z } from "zod";
+import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { handleMCPError, sanitizeSessionId } from "../lib/utils.js";
 import { SessionManager } from "../session-manager.js";
+import logger from "../lib/logger.js";
+
+// Resolve where a tb_screenshot PNG should be written. A `savePath` ending in
+// .png is used verbatim; any other value is treated as a directory; absent, we
+// fall back to the OS temp dir. Relative paths resolve against the process CWD.
+function resolveScreenshotPath(savePath: string | undefined, stamp: number): string {
+  const fileName = `tb-screenshot-${stamp}.png`;
+  if (!savePath) return join(tmpdir(), "testingbot-mcp-screenshots", fileName);
+  const abs = isAbsolute(savePath) ? savePath : resolve(process.cwd(), savePath);
+  return /\.png$/i.test(abs) ? abs : join(abs, fileName);
+}
 
 // Browser-session helpers that don't fit neatly inside browse.ts (they touch
 // the manager generically and could pick up future session types). Mobile
@@ -54,16 +69,40 @@ export default function addSharedTools(server: any, sessions: SessionManager) {
   // ---------------------------------------------------------------------------
   tools.tb_screenshot = server.tool(
     "tb_screenshot",
-    "Capture a PNG screenshot of the active browser session as a base64 image content block.",
+    "Capture a PNG screenshot of the active browser session. Returns a base64 image content block AND saves the PNG to disk, returning a clickable file:// link — many MCP clients (e.g. Claude Desktop) don't render tool-returned images inline, so the saved file is the reliable way for a human to view it. Pass `savePath` to control where it's written (a .png file path, or a directory); otherwise it goes to the OS temp dir.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
+      savePath: z
+        .string()
+        .optional()
+        .describe(
+          "Where to write the PNG: a full file path ending in .png, or a directory (a filename is generated). Relative paths resolve against the server's working directory. Defaults to the OS temp dir."
+        ),
     },
-    async (args: { sessionId: string }) => {
+    async (args: { sessionId: string; savePath?: string }) => {
       try {
         const session = sessions.touch(sanitizeSessionId(args.sessionId));
         const dataB64 = (await session.driver.takeScreenshot()) as string;
+
+        // Persist to disk so there's always a human-viewable artifact, even when
+        // the client won't render the inline image. Best-effort: a write failure
+        // must not lose the screenshot, so we still return the image block.
+        let note: string;
+        const filePath = resolveScreenshotPath(args.savePath, Date.now());
+        try {
+          await mkdir(dirname(filePath), { recursive: true });
+          await writeFile(filePath, Buffer.from(dataB64, "base64"));
+          note = `Screenshot saved to ${filePath}\nOpen it: [${filePath}](${pathToFileURL(filePath).href})`;
+        } catch (err) {
+          logger.warn({ err, filePath }, "Failed to write screenshot to disk");
+          note = `(Could not save the screenshot to ${filePath}: ${err instanceof Error ? err.message : String(err)}. The inline image is still attached.)`;
+        }
+
         return {
-          content: [{ type: "image", data: dataB64, mimeType: "image/png" }],
+          content: [
+            { type: "text", text: note },
+            { type: "image", data: dataB64, mimeType: "image/png" },
+          ],
         };
       } catch (error) {
         return handleMCPError("tb_screenshot", error);

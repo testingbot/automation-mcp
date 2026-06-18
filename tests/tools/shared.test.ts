@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import addSharedTools from "../../src/tools/shared.js";
 import { SessionManager } from "../../src/session-manager.js";
 
@@ -45,12 +48,37 @@ describe("Shared tools", () => {
 
   // ---- tb_screenshot -------------------------------------------------------
 
-  it("tb_screenshot returns the driver's base64 PNG output", async () => {
+  it("tb_screenshot returns the driver's base64 PNG output as an image block", async () => {
     const result = await tools.tb_screenshot.handler({ sessionId: "b1" });
     expect(fakeBrowserDriver.takeScreenshot).toHaveBeenCalled();
-    expect(result.content[0].type).toBe("image");
-    expect(result.content[0].mimeType).toBe("image/png");
-    expect(result.content[0].data).toBe("PNGBROWSERB64");
+    const image = result.content.find((c: any) => c.type === "image");
+    expect(image.mimeType).toBe("image/png");
+    expect(image.data).toBe("PNGBROWSERB64");
+  });
+
+  it("tb_screenshot also saves the PNG to disk and returns a clickable file link", async () => {
+    const target = join(tmpdir(), `tb-screenshot-test-${process.pid}.png`);
+    try {
+      const result = await tools.tb_screenshot.handler({ sessionId: "b1", savePath: target });
+      const note = result.content.find((c: any) => c.type === "text").text;
+      expect(note).toContain(target);
+      expect(note).toContain("file://");
+      // File exists with the decoded bytes the driver returned.
+      const onDisk = await readFile(target);
+      expect(onDisk.equals(Buffer.from("PNGBROWSERB64", "base64"))).toBe(true);
+      // The inline image block is still attached for clients that can render it.
+      expect(result.content.some((c: any) => c.type === "image")).toBe(true);
+    } finally {
+      await rm(target, { force: true });
+    }
+  });
+
+  it("tb_screenshot treats a savePath directory by generating a .png filename", async () => {
+    const result = await tools.tb_screenshot.handler({ sessionId: "b1", savePath: tmpdir() });
+    const note = result.content.find((c: any) => c.type === "text").text;
+    const match = note.match(/Screenshot saved to (.+\.png)/);
+    expect(match).toBeTruthy();
+    await rm(match[1], { force: true });
   });
 
   it("tb_screenshot fails helpfully on unknown sessionId", async () => {
