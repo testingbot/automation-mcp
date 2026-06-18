@@ -1,4 +1,4 @@
-name: Release
+name: Publish to npm
 
 on:
   # Publish when a GitHub Release is published (tag it vX.Y.Z first).
@@ -7,16 +7,18 @@ on:
   # Or trigger manually from the Actions tab.
   workflow_dispatch:
 
+permissions:
+  contents: read
+  # Required for npm Trusted Publishing (OIDC) — mints the short-lived token used
+  # to authenticate to the registry. No NPM_TOKEN secret needed.
+  id-token: write
+
 jobs:
   publish:
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
-      # Required for npm Trusted Publishing (OIDC) — mints the short-lived
-      # token used to authenticate to the registry. No NPM_TOKEN secret needed.
       id-token: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -48,9 +50,13 @@ jobs:
           fi
           echo "Version $PKG_VERSION matches tag."
 
-      # No NODE_AUTH_TOKEN: OIDC handles auth. npm publish runs prepublishOnly
-      # -> npm run build (lint + format:check + test + tsc), so a broken build
-      # or failing test blocks the publish. --provenance is set defensively
+      # Build + lint + tests (the build script runs them) so a broken build or
+      # failing test blocks the publish, and dist/ is freshly compiled regardless
+      # of whether the package defines a prepublishOnly hook.
+      - name: Build
+        run: npm run build
+
+      # No NODE_AUTH_TOKEN: OIDC handles auth. --provenance is set defensively
       # (trusted publishing usually emits it automatically).
       - name: Publish to npm
         run: npm publish --provenance --access public

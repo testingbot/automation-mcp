@@ -2,7 +2,7 @@
 
 MCP server that lets AI agents drive remote browsers **and real iOS / Android devices** on [TestingBot](https://testingbot.com)'s grid. Real Safari on macOS, Edge on Windows, Firefox, Chrome on any supported OS, plus physical Appium devices — all from one install, no local browser, simulator, or Appium server required. Every session includes a live-view URL so a human can watch the agent drive in real time.
 
-> **Status: alpha (`0.1.0`).** One install gets you both browser and mobile automation. Mobile is powered by the official [`appium-mcp`](https://github.com/appium/appium-mcp), spawned as a child process and proxied through this server — you never need to install or configure it yourself.
+> **Status: alpha.** One install gets you both browser and mobile automation. Mobile is powered by the official [`appium-mcp`](https://github.com/appium/appium-mcp), spawned as a child process and proxied through this server — you never need to install or configure it yourself.
 
 ## What's in the box
 
