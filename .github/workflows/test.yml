@@ -33,8 +33,10 @@ jobs:
 
       # Bundling appium-mcp pulls in a few hundred MB of native drivers, so the
       # install is heavier than a typical MCP server. npm cache (above) helps.
+      # --allow-git=all: recent npm blocks transitive git dependencies by
+      # default, and appium-mcp pins applesign's fs-walk to a GitHub ref.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --allow-git=all
 
       - name: Lint
         run: npm run lint
