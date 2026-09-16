@@ -3,11 +3,25 @@ export interface TestingBotConfig {
   "testingbot-secret": string;
 }
 
+/** Request options forwarded to the MCP SDK's `callTool`. */
+export interface ProxyCallOptions {
+  /** Per-request timeout in ms. Overrides the SDK's 60s default. */
+  timeout?: number;
+  /** Restart the timeout clock whenever the child reports progress. */
+  resetTimeoutOnProgress?: boolean;
+  /** Absolute ceiling, even with progress notifications resetting the clock. */
+  maxTotalTimeout?: number;
+}
+
 export interface ProxyClientLike {
   listTools(): Promise<{
     tools: Array<{ name: string; description?: string; inputSchema?: unknown }>;
   }>;
-  callTool(params: { name: string; arguments?: Record<string, unknown> }): Promise<unknown>;
+  callTool(
+    params: { name: string; arguments?: Record<string, unknown> },
+    resultSchema?: unknown,
+    options?: ProxyCallOptions
+  ): Promise<unknown>;
   close(): Promise<void>;
 }
 
