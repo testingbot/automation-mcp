@@ -20,7 +20,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import logger from "../lib/logger.js";
 import { handleMCPError } from "../lib/utils.js";
-import type { TestingBotConfig, ProxyClientLike } from "../lib/types.js";
+import type { TestingBotConfig, ProxyClientLike, ProxyCallOptions } from "../lib/types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -30,6 +30,51 @@ const HUB_PATH = "/wd/hub";
 // if the agent supplies its own remoteServerUrl, the child will reject any
 // URL pointing elsewhere.
 const ALLOW_REGEX = "^https://[^@]+@hub\\.testingbot\\.com/wd/hub$";
+
+/**
+ * The MCP SDK applies a 60s default request timeout to every `callTool`, which
+ * is far shorter than real-device provisioning on the TestingBot hub: a free
+ * iPhone can take ~200s to come up, and the hub itself only gives up at ~315s.
+ * Without an explicit timeout the client abandons the request while the hub
+ * keeps starting the session — the agent never learns the session ID, so it
+ * can neither use nor delete the session, and it bills until the hub reaps it.
+ */
+export const DEFAULT_CALL_TIMEOUT_MS = 120_000;
+/** Session creation waits on device allocation — give it the hub's full budget. */
+export const DEFAULT_SESSION_CREATE_TIMEOUT_MS = 600_000;
+
+/** Parse a positive-integer millisecond value; undefined if unset or invalid. */
+function readTimeoutEnv(env: NodeJS.ProcessEnv, name: string): number | undefined {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    logger.warn({ env: name, value: raw }, "Ignoring invalid timeout env var");
+    return undefined;
+  }
+  return Math.floor(parsed);
+}
+
+/**
+ * Request options for one proxied call. `resetTimeoutOnProgress` means a child
+ * that does emit progress notifications keeps the call alive; `maxTotalTimeout`
+ * still bounds it so a chatty child can't hang the agent forever.
+ */
+export function callOptionsFor(
+  toolName: string,
+  args: Record<string, unknown>,
+  env: NodeJS.ProcessEnv = process.env
+): ProxyCallOptions {
+  const isSessionCreate =
+    toolName === "appium_session_management" && (args.action ?? "create") === "create";
+
+  const timeout = isSessionCreate
+    ? (readTimeoutEnv(env, "TESTINGBOT_APPIUM_SESSION_TIMEOUT_MS") ??
+      DEFAULT_SESSION_CREATE_TIMEOUT_MS)
+    : (readTimeoutEnv(env, "TESTINGBOT_APPIUM_TIMEOUT_MS") ?? DEFAULT_CALL_TIMEOUT_MS);
+
+  return { timeout, resetTimeoutOnProgress: true, maxTotalTimeout: timeout };
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ToolServer = { tool: (name: string, desc: string, schema: any, handler: any) => any };
@@ -243,7 +288,11 @@ export async function addAppiumProxyTools(
             injected.remoteServerUrl = remoteServerUrl;
           }
         }
-        return await client.callTool({ name, arguments: injected });
+        return await client.callTool(
+          { name, arguments: injected },
+          undefined,
+          callOptionsFor(name, injected)
+        );
       } catch (error) {
         return handleMCPError(name, error);
       }

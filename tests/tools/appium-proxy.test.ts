@@ -3,18 +3,29 @@ import addAppiumProxyTools, {
   buildRemoteServerUrl,
   applyAgentSteering,
   applySchemaRewrite,
+  callOptionsFor,
+  DEFAULT_CALL_TIMEOUT_MS,
+  DEFAULT_SESSION_CREATE_TIMEOUT_MS,
   HIDDEN_TOOLS,
 } from "../../src/tools/appium-proxy.js";
-import type { ProxyClientLike } from "../../src/lib/types.js";
+import type { ProxyCallOptions, ProxyClientLike } from "../../src/lib/types.js";
 
 function makeFakeChild(): {
   client: ProxyClientLike;
   closed: { value: boolean };
   listToolsCalls: { value: number };
-  callToolCalls: Array<{ name: string; arguments?: Record<string, unknown> }>;
+  callToolCalls: Array<{
+    name: string;
+    arguments?: Record<string, unknown>;
+    options?: ProxyCallOptions;
+  }>;
 } {
   const closed = { value: false };
-  const callToolCalls: Array<{ name: string; arguments?: Record<string, unknown> }> = [];
+  const callToolCalls: Array<{
+    name: string;
+    arguments?: Record<string, unknown>;
+    options?: ProxyCallOptions;
+  }> = [];
   const listToolsCalls = { value: 0 };
   const client: ProxyClientLike = {
     async listTools() {
@@ -42,8 +53,8 @@ function makeFakeChild(): {
         ],
       };
     },
-    async callTool(params) {
-      callToolCalls.push(params);
+    async callTool(params, _resultSchema, options) {
+      callToolCalls.push({ ...params, options });
       return { content: [{ type: "text", text: `OK ${params.name}` }] };
     },
     async close() {
@@ -160,6 +171,34 @@ describe("addAppiumProxyTools", () => {
     });
     const result = await (handle.tools as any).appium_screenshot.handler({ sessionId: "abc" });
     expect(result).toEqual({ content: [{ type: "text", text: "OK appium_screenshot" }] });
+  });
+
+  it("gives session creation a device-provisioning timeout, not the SDK's 60s default", async () => {
+    const fake = makeFakeChild();
+    const handle = await addAppiumProxyTools(serverMock, config, {
+      spawn: async () => ({ client: fake.client, close: fake.client.close.bind(fake.client) }),
+    });
+
+    await (handle.tools as any).appium_session_management.handler({
+      action: "create",
+      capabilities: { platformName: "iOS" },
+    });
+
+    // A real iPhone can take ~200s to come up and the hub only gives up at
+    // ~315s — anything near 60s orphans a session we can neither use nor close.
+    expect(fake.callToolCalls[0].options?.timeout).toBe(DEFAULT_SESSION_CREATE_TIMEOUT_MS);
+    expect(fake.callToolCalls[0].options?.timeout).toBeGreaterThan(315_000);
+    expect(fake.callToolCalls[0].options?.resetTimeoutOnProgress).toBe(true);
+  });
+
+  it("gives ordinary proxied calls the default call timeout", async () => {
+    const fake = makeFakeChild();
+    const handle = await addAppiumProxyTools(serverMock, config, {
+      spawn: async () => ({ client: fake.client, close: fake.client.close.bind(fake.client) }),
+    });
+
+    await (handle.tools as any).appium_screenshot.handler({ sessionId: "abc" });
+    expect(fake.callToolCalls[0].options?.timeout).toBe(DEFAULT_CALL_TIMEOUT_MS);
   });
 
   it("wraps callTool errors via handleMCPError so the agent gets a clean message", async () => {
@@ -315,5 +354,46 @@ describe("addAppiumProxyTools", () => {
     expect(HIDDEN_TOOLS.has("prepare_ios_simulator")).toBe(true);
     expect(HIDDEN_TOOLS.has("appium_prepare_ios_real_device")).toBe(true);
     expect(HIDDEN_TOOLS.has("appium_screenshot")).toBe(false);
+  });
+});
+
+describe("callOptionsFor", () => {
+  it("uses the long timeout for create and the short one for other actions", () => {
+    expect(callOptionsFor("appium_session_management", { action: "create" }, {}).timeout).toBe(
+      DEFAULT_SESSION_CREATE_TIMEOUT_MS
+    );
+    // create is the implicit default when the agent omits the action
+    expect(callOptionsFor("appium_session_management", {}, {}).timeout).toBe(
+      DEFAULT_SESSION_CREATE_TIMEOUT_MS
+    );
+    expect(callOptionsFor("appium_session_management", { action: "delete" }, {}).timeout).toBe(
+      DEFAULT_CALL_TIMEOUT_MS
+    );
+    expect(callOptionsFor("appium_find_element", {}, {}).timeout).toBe(DEFAULT_CALL_TIMEOUT_MS);
+  });
+
+  it("honors the env-var overrides", () => {
+    const env = {
+      TESTINGBOT_APPIUM_SESSION_TIMEOUT_MS: "900000",
+      TESTINGBOT_APPIUM_TIMEOUT_MS: "45000",
+    };
+    expect(callOptionsFor("appium_session_management", { action: "create" }, env).timeout).toBe(
+      900_000
+    );
+    expect(callOptionsFor("appium_screenshot", {}, env).timeout).toBe(45_000);
+  });
+
+  it("falls back to the defaults for blank or nonsense env values", () => {
+    for (const value of ["", "   ", "not-a-number", "0", "-5"]) {
+      expect(
+        callOptionsFor("appium_screenshot", {}, { TESTINGBOT_APPIUM_TIMEOUT_MS: value }).timeout
+      ).toBe(DEFAULT_CALL_TIMEOUT_MS);
+    }
+  });
+
+  it("bounds the call with maxTotalTimeout so progress notifications can't hang it forever", () => {
+    const opts = callOptionsFor("appium_session_management", { action: "create" }, {});
+    expect(opts.resetTimeoutOnProgress).toBe(true);
+    expect(opts.maxTotalTimeout).toBe(opts.timeout);
   });
 });

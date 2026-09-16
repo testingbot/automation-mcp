@@ -36,6 +36,8 @@ We pre-inject two things for every session-create call:
 
 So the agent only needs to call `appium_session_management(action: "create", capabilities: { platformName: "iOS", ... })`. No URL, no credentials, no setup.
 
+Device provisioning is slow — a free real iPhone can take minutes — so proxied calls get generous request timeouts instead of the MCP SDK's 60 s default: 10 min for `appium_session_management` creates, 2 min for everything else. Override with `TESTINGBOT_APPIUM_SESSION_TIMEOUT_MS` and `TESTINGBOT_APPIUM_TIMEOUT_MS` (milliseconds).
+
 > Mobile tools won't appear if the bundled `appium-mcp` package fails to start (e.g. its native deps can't be loaded). Browser tools work independently.
 
 ## Install
