@@ -160,6 +160,10 @@ describe("register.addAutomationTools", () => {
     expect(disposeB).toHaveBeenCalled();
     expect(handle.sessions.size()).toBe(0);
     expect(child.closed.value).toBe(true);
+
+    // The manager is reusable afterwards: a host that tears the tool family
+    // down and brings it back up in the same process must not be left with a
+    // permanently dead SessionManager.
     expect(() =>
       handle.sessions.register({
         id: "c",
@@ -170,7 +174,9 @@ describe("register.addAutomationTools", () => {
         liveViewUrl: "x",
         dispose: vi.fn().mockResolvedValue(undefined),
       })
-    ).toThrow(/shutting down/);
+    ).not.toThrow();
+    expect(handle.sessions.size()).toBe(1);
+    await handle.sessions.closeAll();
   });
 
   it("continues without mobile tools when the appium-mcp spawn fails", async () => {

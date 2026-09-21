@@ -71,7 +71,7 @@ describe("SessionManager", () => {
     expect(await mgr.close("ghost")).toBe(false);
   });
 
-  it("closeAll() shuts down every active session and prevents new registrations", async () => {
+  it("closeAll() shuts down every active session", async () => {
     const a = makeFakeSession("a");
     const b = makeFakeSession("b");
     mgr.register(a);
@@ -80,7 +80,49 @@ describe("SessionManager", () => {
     expect(a.browser.close).toHaveBeenCalled();
     expect(b.browser.close).toHaveBeenCalled();
     expect(mgr.size()).toBe(0);
-    expect(() => mgr.register(makeFakeSession("c"))).toThrow(/shutting down/);
+  });
+
+  it("closeAll() rejects registrations made while the sweep is in flight", async () => {
+    const slow = makeFakeSession("slow");
+    let release: () => void = () => {};
+    slow.browser.close.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (release = resolve))
+    );
+    mgr.register(slow);
+
+    const sweeping = mgr.closeAll();
+    expect(() => mgr.register(makeFakeSession("mid-sweep"))).toThrow(/shutting down/);
+
+    release();
+    await sweeping;
+  });
+
+  it("is reusable after closeAll() — the flag is not a one-way latch", async () => {
+    // A library host may shut the tool family down and bring it back up in the
+    // same process. Leaving `shuttingDown` set would make every later
+    // register() throw and the manager would be silently dead.
+    mgr.register(makeFakeSession("a"));
+    await mgr.closeAll();
+
+    expect(() => mgr.register(makeFakeSession("b"))).not.toThrow();
+    expect(mgr.size()).toBe(1);
+  });
+
+  it("restarts the idle reaper after a closeAll()", async () => {
+    const revived = new SessionManager({
+      idleTimeoutMs: 10,
+      reaperIntervalMs: 10,
+      maxSessions: 5,
+    });
+    await revived.closeAll();
+
+    const fake = makeFakeSession("after-restart");
+    revived.register(fake);
+    await new Promise((r) => setTimeout(r, 60));
+    // Without startReaper() in register(), this session would idle forever and
+    // bill until TestingBot's own reaper killed it.
+    expect(revived.size()).toBe(0);
+    await revived.closeAll();
   });
 
   it("does not leak the session from the map if browser.close() throws", async () => {

@@ -20,7 +20,7 @@ function resolveScreenshotPath(savePath: string | undefined, stamp: number): str
 // Browser-session helpers that don't fit neatly inside browse.ts (they touch
 // the manager generically and could pick up future session types). Mobile
 // device sessions are delegated to https://github.com/appium/appium-mcp via
-// the tb_appiumEndpoint bridge tool, so they aren't dispatched here.
+// the proxied appium_session_management tool, so they aren't dispatched here.
 
 // W3C key codes for browser tb_pressKey. Stored via \u escapes so the
 // codepoints survive any source-tooling that might silently strip them.
@@ -46,12 +46,28 @@ const W3C_KEY_CODES: Record<string, string> = {
   Cmd: "\uE053",
 };
 
+/** Split a chord on "+" while still allowing the literal plus key, which is
+ *  itself spelled "+" ("+" alone, or "Control++" for Control plus the key). */
+function splitChord(key: string): string[] {
+  const trimmed = key.trim();
+  if (trimmed === "+") return ["+"];
+  // A trailing "++" is a separator followed by the literal plus key.
+  const literalPlusSuffix = trimmed.endsWith("++");
+  const body = literalPlusSuffix ? trimmed.slice(0, -1) : trimmed;
+  const parts = body
+    .split("+")
+    .map((p) => p.trim())
+    .filter((p) => p !== "");
+  if (literalPlusSuffix) parts.push("+");
+  return parts;
+}
+
 /** Build a W3C key-actions sequence for a single key or chord like "Control+A".
  *  Modifier keys press down across the inner key, then release in reverse. */
 function buildKeyActions(
   key: string
 ): Array<{ type: "keyDown" | "keyUp" | "pause"; value?: string; duration?: number }> {
-  const parts = key.split("+").map((p) => p.trim());
+  const parts = splitChord(key);
   const codes = parts.map((p) => W3C_KEY_CODES[p] ?? p);
   const actions: Array<{ type: "keyDown" | "keyUp"; value: string }> = [];
   for (const c of codes) actions.push({ type: "keyDown", value: c });
@@ -138,7 +154,7 @@ export default function addSharedTools(server: any, sessions: SessionManager) {
   // ---------------------------------------------------------------------------
   tools.tb_listSessions = server.tool(
     "tb_listSessions",
-    "List all active browser sessions managed by this server. Useful when you've lost track of a sessionId. (Mobile device sessions are managed by appium-mcp — see tb_appiumEndpoint.)",
+    "List all active browser sessions managed by this server. Useful when you've lost track of a sessionId. (Mobile device sessions are NOT listed here — they live inside appium-mcp; use appium_session_management with action 'list'.)",
     {},
     async () => {
       try {

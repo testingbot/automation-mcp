@@ -61,9 +61,16 @@ export const LOCATOR_KEYS = [
 export type LocatorBy = (typeof LOCATOR_KEYS)[number];
 
 /** Escape a string for safe use inside a CSS identifier. `CSS.escape` is a
- *  DOM-only API, so we ship a minimal replacement here. */
+ *  DOM-only API, so we ship a minimal replacement here. A leading digit (or a
+ *  leading hyphen-digit) can't be backslash-escaped — CSS requires the hex
+ *  form `\3<digit> ` — so those are handled separately. */
 function cssEscape(value: string): string {
-  return value.replace(/([^a-zA-Z0-9_-])/g, "\\$1");
+  const escaped = value.replace(/([^a-zA-Z0-9_-])/g, "\\$1");
+  const leadingDigit = /^(-?)([0-9])/.exec(escaped);
+  if (!leadingDigit) return escaped;
+  const [, dash, digit] = leadingDigit;
+  // Trailing space terminates the hex escape; it is not part of the identifier.
+  return `${dash}\\3${digit} ${escaped.slice(dash.length + 1)}`;
 }
 
 /** Convert (by, value) to the W3C (strategy, query) pair. `id`/`name`/`class`
@@ -79,7 +86,17 @@ function buildLocator(by: LocatorBy, value: string): { using: string; value: str
     case "name":
       return { using: "css selector", value: `[name=${JSON.stringify(value)}]` };
     case "class":
-      return { using: "css selector", value: `.${cssEscape(value)}` };
+      // "btn primary" means an element carrying BOTH classes — the compound
+      // selector `.btn.primary`. Escaping it as one token would look for a
+      // single class literally named "btn primary".
+      return {
+        using: "css selector",
+        value: value
+          .trim()
+          .split(/\s+/)
+          .map((c) => `.${cssEscape(c)}`)
+          .join(""),
+      };
     case "tag":
       return { using: "tag name", value };
     case "linkText":
@@ -96,6 +113,50 @@ async function findOne(driver: any, by: LocatorBy, value: string): Promise<strin
   const id = asElementId(found);
   if (!id) throw new Error(`Element not found: ${by}=${value}`);
   return id;
+}
+
+// How long tb_navigate waits after the driver's navigation call resolves.
+// `navigateTo` returns per the session's pageLoadStrategy, which on a page with
+// slow third-party resources can land the agent on a half-built DOM — so we
+// confirm document.readyState ourselves.
+export const READY_STATES = ["load", "domcontentloaded", "none"] as const;
+export type ReadyState = (typeof READY_STATES)[number];
+
+const ACCEPTED_READY_STATES: Record<Exclude<ReadyState, "none">, string[]> = {
+  load: ["complete"],
+  domcontentloaded: ["interactive", "complete"],
+};
+
+/**
+ * Poll document.readyState until it satisfies `waitUntil`.
+ *
+ * Returns null once satisfied, or the last-seen readyState if the deadline
+ * passed. Deliberately does NOT throw on timeout: the navigation itself
+ * succeeded and the page is usually usable, so the caller surfaces a warning
+ * rather than failing a tool call the agent can't act on.
+ */
+async function waitForReadyState(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  driver: any,
+  waitUntil: ReadyState,
+  timeoutMs: number
+): Promise<string | null> {
+  if (waitUntil === "none") return null;
+  const accepted = ACCEPTED_READY_STATES[waitUntil];
+  const deadline = Date.now() + timeoutMs;
+  let last = "";
+  for (;;) {
+    try {
+      last = String(await driver.executeScript("return document.readyState", []));
+    } catch (err) {
+      // A navigation still in flight can transiently kill the execution
+      // context. Keep polling until the deadline rather than failing.
+      logger.debug({ err }, "readyState probe failed; retrying");
+    }
+    if (accepted.includes(last)) return null;
+    if (Date.now() >= deadline) return last || "unknown";
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 const normalizeDeviceToken = (s: unknown): string =>
@@ -450,15 +511,41 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_navigate = server.tool(
     "tb_navigate",
-    "Navigate the session's browser to a URL.",
+    "Navigate the session's browser to a URL. By default it waits for the page to finish loading; use `waitUntil` to return earlier on a slow page.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       url: z.string().url().describe("URL to navigate to"),
+      waitUntil: z
+        .enum(READY_STATES)
+        .optional()
+        .default("load")
+        .describe(
+          "How long to wait after navigating: 'load' (document.readyState === 'complete', the default), 'domcontentloaded' (readyState 'interactive' or better — returns earlier on pages with slow images/ads), or 'none' (return as soon as the driver's own navigation call resolves)."
+        ),
+      timeoutMs: z
+        .number()
+        .int()
+        .min(100)
+        .max(120_000)
+        .optional()
+        .default(30_000)
+        .describe("How long to wait for `waitUntil` to be satisfied (default 30000ms)."),
     },
-    async (args: { sessionId: string; url: string }) => {
+    async (args: {
+      sessionId: string;
+      url: string;
+      waitUntil?: ReadyState;
+      timeoutMs?: number;
+    }) => {
       try {
         const session = sessions.touchAs(sanitizeSessionId(args.sessionId), "browser");
+        const waitUntil = args.waitUntil ?? "load";
         await session.driver.navigateTo(args.url);
+        const pending = await waitForReadyState(
+          session.driver,
+          waitUntil,
+          args.timeoutMs ?? 30_000
+        );
         const [title, currentUrl] = await Promise.all([
           session.driver.getTitle(),
           session.driver.getUrl(),
@@ -467,7 +554,11 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
           content: [
             {
               type: "text",
-              text: `Navigated to ${args.url}\n\n- **Page title**: ${title}\n- **URL**: ${currentUrl}`,
+              text:
+                `Navigated to ${args.url}\n\n- **Page title**: ${title}\n- **URL**: ${currentUrl}` +
+                (pending
+                  ? `\n\n⚠️ Still loading after ${args.timeoutMs ?? 30_000}ms (document.readyState: ${pending}). The page is usable — re-run tb_snapshot if content is missing.`
+                  : ""),
             },
           ],
         };
