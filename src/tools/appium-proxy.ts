@@ -219,14 +219,26 @@ export function applySchemaRewrite(name: string, upstreamSchema: unknown): unkno
   };
 }
 
+/** Every env var config.ts reads a credential from — kept in sync with getConfig(). */
+export const CREDENTIAL_ENV_NAMES = [
+  "TESTINGBOT_KEY",
+  "TESTINGBOT_SECRET",
+  "TB_KEY",
+  "TB_SECRET",
+  "TESTINGBOT_USERNAME",
+  "TESTINGBOT_ACCESS_KEY",
+] as const;
+
 function filterEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
     if (v !== undefined) out[k] = v;
   }
   // Don't leak our credentials to the child — it doesn't need them. They're
-  // already baked into the URL we'll pass at call time.
-  for (const k of ["TESTINGBOT_KEY", "TESTINGBOT_SECRET", "TB_KEY", "TB_SECRET"]) {
+  // already baked into the URL we'll pass at call time. This list must cover
+  // EVERY name config.ts accepts, or a user who configured the server via a
+  // fallback name silently hands their credentials to the child process.
+  for (const k of CREDENTIAL_ENV_NAMES) {
     delete out[k];
   }
   return out;

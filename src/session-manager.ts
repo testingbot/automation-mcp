@@ -1,7 +1,8 @@
 import logger from "./lib/logger.js";
 
 // This server manages browser sessions only. Mobile device sessions are
-// delegated to https://github.com/appium/appium-mcp — see tb_appiumEndpoint.
+// delegated to https://github.com/appium/appium-mcp and are managed there via
+// the proxied appium_session_management tool.
 export type SessionType = "browser";
 
 // Shape of a Webdriver client (webdriver package). We duck-type here rather
@@ -60,12 +61,16 @@ export class SessionManager {
       maxSessions: opts.maxSessions ?? DEFAULTS.maxSessions,
       reaperIntervalMs: opts.reaperIntervalMs ?? DEFAULTS.reaperIntervalMs,
     };
-    if (this.opts.reaperIntervalMs > 0) {
-      this.reaperTimer = setInterval(() => {
-        void this.reapIdle().catch((err) => logger.error({ err }, "Idle reaper failed"));
-      }, this.opts.reaperIntervalMs);
-      this.reaperTimer.unref?.();
-    }
+    this.startReaper();
+  }
+
+  /** (Re)start the idle reaper. No-op when disabled or already running. */
+  private startReaper(): void {
+    if (this.opts.reaperIntervalMs <= 0 || this.reaperTimer) return;
+    this.reaperTimer = setInterval(() => {
+      void this.reapIdle().catch((err) => logger.error({ err }, "Idle reaper failed"));
+    }, this.opts.reaperIntervalMs);
+    this.reaperTimer.unref?.();
   }
 
   /** Number of live sessions. */
@@ -98,6 +103,8 @@ export class SessionManager {
     const now = Date.now();
     const full = { ...session, createdAt: now, lastUsedAt: now } as Session;
     this.sessions.set(session.id, full);
+    // closeAll() stops the reaper; a manager that gets reused needs it back.
+    this.startReaper();
     logger.info(
       { id: session.id, type: session.type, active: this.sessions.size },
       "Session registered"
@@ -146,14 +153,27 @@ export class SessionManager {
     return true;
   }
 
+  /**
+   * Close every live session and stop the reaper.
+   *
+   * `shuttingDown` is held only for the duration of the sweep — it exists to
+   * reject sessions registered mid-teardown, not to retire the manager. A
+   * long-lived library host may shut the tool family down and bring it back up
+   * in the same process; leaving the flag set would make every later
+   * register() throw "SessionManager is shutting down".
+   */
   async closeAll(): Promise<void> {
     this.shuttingDown = true;
-    if (this.reaperTimer) {
-      clearInterval(this.reaperTimer);
-      this.reaperTimer = null;
+    try {
+      if (this.reaperTimer) {
+        clearInterval(this.reaperTimer);
+        this.reaperTimer = null;
+      }
+      const ids = [...this.sessions.keys()];
+      await Promise.all(ids.map((id) => this.close(id)));
+    } finally {
+      this.shuttingDown = false;
     }
-    const ids = [...this.sessions.keys()];
-    await Promise.all(ids.map((id) => this.close(id)));
   }
 
   private async reapIdle(): Promise<void> {

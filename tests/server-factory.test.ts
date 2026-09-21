@@ -68,8 +68,15 @@ describe("AutomationMcpServer", () => {
   it("rejects unsupported Node versions before hitting the API", async () => {
     setNodeVersion("16.20.0");
     const server = new AutomationMcpServer(testingBotApi, config);
-    await expect(server.preflight()).rejects.toThrow(/Node\.js 18\+ required/);
+    await expect(server.preflight()).rejects.toThrow(/Node\.js 20\+ required/);
     expect(testingBotApi.getUserInfo).not.toHaveBeenCalled();
+  });
+
+  it("enforces the same Node floor that package.json declares", async () => {
+    // The runtime gate and engines.node must not drift apart.
+    setNodeVersion("18.20.0");
+    const server = new AutomationMcpServer(testingBotApi, config);
+    await expect(server.preflight()).rejects.toThrow(/Node\.js 20\+ required/);
   });
 
   it("rejects when api_key is missing", async () => {

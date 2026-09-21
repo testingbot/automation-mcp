@@ -19,12 +19,15 @@ if (debugToFile) {
   logFilePath = path.join(logsDir, "debug.log");
 }
 
-const redactPaths = [
+export const redactPaths = [
   "*.api_key",
   "*.api_secret",
   "*.apiKey",
   "*.apiSecret",
   "*.password",
+  "*.secret",
+  "*.token",
+  "*.accessKey",
   "*.authorization",
   "*.Authorization",
   "options.api_key",
@@ -32,6 +35,17 @@ const redactPaths = [
   "args.localFilePath",
   "args.remoteUrl",
   "headers.authorization",
+  // Tool arguments are logged wholesale on every call (server-factory's
+  // CallTool handler), so anything an agent might put a secret into has to be
+  // covered here:
+  //   text            — tb_type's payload, i.e. whatever gets typed into a
+  //                     login form.
+  //   capabilities    — appium caps carry app credentials and tb:options.
+  //   remoteServerUrl — the injected hub URL embeds key:secret.
+  "args.text",
+  "args.capabilities",
+  "args.remoteServerUrl",
+  "*.remoteServerUrl",
 ];
 
 // MCP servers communicate over stdio — stdout is reserved for JSON-RPC framing.

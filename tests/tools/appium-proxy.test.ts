@@ -7,7 +7,9 @@ import addAppiumProxyTools, {
   DEFAULT_CALL_TIMEOUT_MS,
   DEFAULT_SESSION_CREATE_TIMEOUT_MS,
   HIDDEN_TOOLS,
+  CREDENTIAL_ENV_NAMES,
 } from "../../src/tools/appium-proxy.js";
+import { readFile } from "node:fs/promises";
 import type { ProxyCallOptions, ProxyClientLike } from "../../src/lib/types.js";
 
 function makeFakeChild(): {
@@ -87,6 +89,51 @@ describe("addAppiumProxyTools", () => {
     ]);
     expect(serverMock.tool).toHaveBeenCalledTimes(2);
     expect(fake.listToolsCalls.value).toBe(1);
+  });
+
+  it("strips every credential env name from the child's environment", async () => {
+    // filterEnv must cover EVERY name config.ts reads a credential from, not
+    // just the canonical pair — the child gets credentials only via the hub URL
+    // baked into remoteServerUrl.
+    const saved: Record<string, string | undefined> = {};
+    for (const name of CREDENTIAL_ENV_NAMES) {
+      saved[name] = process.env[name];
+      process.env[name] = `secret-${name}`;
+    }
+    process.env.TB_HARMLESS = "keep-me";
+
+    try {
+      const fake = makeFakeChild();
+      let childEnv: Record<string, string> = {};
+      const handle = await addAppiumProxyTools(serverMock, config, {
+        spawn: async (env: Record<string, string>) => {
+          childEnv = env;
+          return { client: fake.client, close: fake.client.close.bind(fake.client) };
+        },
+      });
+
+      for (const name of CREDENTIAL_ENV_NAMES) {
+        expect(childEnv[name], `${name} leaked to the appium-mcp child`).toBeUndefined();
+      }
+      // Unrelated vars must still pass through — the child needs a real env.
+      expect(childEnv.TB_HARMLESS).toBe("keep-me");
+      await handle.shutdown();
+    } finally {
+      for (const name of CREDENTIAL_ENV_NAMES) {
+        if (saved[name] === undefined) delete process.env[name];
+        else process.env[name] = saved[name];
+      }
+      delete process.env.TB_HARMLESS;
+    }
+  });
+
+  it("covers the same credential env names config.ts reads", async () => {
+    // A new fallback in getConfig() without a matching entry here is a leak.
+    const configSource = await readFile(new URL("../../src/config.ts", import.meta.url), "utf8");
+    const namesInConfig = [...configSource.matchAll(/process\.env\.([A-Z_]+)/g)].map((m) => m[1]);
+    for (const name of namesInConfig) {
+      expect(CREDENTIAL_ENV_NAMES, `${name} is read by config.ts but not stripped`).toContain(name);
+    }
   });
 
   it("rewrites appium_session_management's schema to a TestingBot-clean shape", async () => {

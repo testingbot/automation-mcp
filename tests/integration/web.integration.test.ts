@@ -140,6 +140,18 @@ describeOrSkip("Real browser integration", () => {
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toMatch(/Example Domain/i);
     expect(result.content[0].text).toContain("https://example.com/");
+    // waitUntil 'load' means readyState reached 'complete' before we returned.
+    expect(result.content[0].text).not.toContain("Still loading");
+  });
+
+  it("navigates with waitUntil 'none' without waiting on readyState", async () => {
+    const result = await tools.tb_navigate.handler({
+      sessionId,
+      url: "https://example.com",
+      waitUntil: "none",
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("https://example.com/");
   });
 
   it("returns a non-empty ARIA snapshot", async () => {

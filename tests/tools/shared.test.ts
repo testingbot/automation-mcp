@@ -109,6 +109,25 @@ describe("Shared tools", () => {
     expect(actions[3]).toEqual({ type: "keyUp", value: "" });
   });
 
+  it("tb_pressKey sends the literal plus key", async () => {
+    // "+" is both the chord separator and a real key; splitting naively left
+    // it unpressable.
+    await tools.tb_pressKey.handler({ sessionId: "b1", key: "+" });
+    const actions = (fakeBrowserDriver.performActions as any).mock.calls[0][0][0].actions;
+    expect(actions).toEqual([
+      { type: "keyDown", value: "+" },
+      { type: "keyUp", value: "+" },
+    ]);
+  });
+
+  it("tb_pressKey handles a chord ending in the literal plus key", async () => {
+    await tools.tb_pressKey.handler({ sessionId: "b1", key: "Control++" });
+    const actions = (fakeBrowserDriver.performActions as any).mock.calls[0][0][0].actions;
+    expect(actions).toHaveLength(4);
+    expect(actions[1]).toEqual({ type: "keyDown", value: "+" });
+    expect(actions[2]).toEqual({ type: "keyUp", value: "+" });
+  });
+
   it("tb_pressKey calls releaseActions to clear modifier state", async () => {
     await tools.tb_pressKey.handler({ sessionId: "b1", key: "Tab" });
     expect(fakeBrowserDriver.releaseActions).toHaveBeenCalled();

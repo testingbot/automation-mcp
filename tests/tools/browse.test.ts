@@ -8,17 +8,30 @@ const { fakeDriver, mockNewSession } = vi.hoisted(() => {
     navigateTo: vi.fn().mockResolvedValue(undefined),
     getTitle: vi.fn().mockResolvedValue("Example Domain"),
     getUrl: vi.fn().mockResolvedValue("https://example.com/"),
-    executeScript: vi.fn().mockResolvedValue({
-      title: "Example Domain",
-      url: "https://example.com/",
-      headings: ["H1: Example Domain"],
-      actionable: [
-        { tag: "a", role: null, text: "More information...", href: "https://www.iana.org/" },
-      ],
-      actionableTotal: 1,
-      body: "This domain is for use in illustrative examples.",
-      bodyTruncated: false,
-    }),
+    // tb_navigate probes document.readyState; everything else in these tests is
+    // the snapshot payload. Dispatch on the script so both paths work.
+    executeScript: vi.fn().mockImplementation((script: string) =>
+      Promise.resolve(
+        /readyState/.test(script)
+          ? "complete"
+          : {
+              title: "Example Domain",
+              url: "https://example.com/",
+              headings: ["H1: Example Domain"],
+              actionable: [
+                {
+                  tag: "a",
+                  role: null,
+                  text: "More information...",
+                  href: "https://www.iana.org/",
+                },
+              ],
+              actionableTotal: 1,
+              body: "This domain is for use in illustrative examples.",
+              bodyTruncated: false,
+            }
+      )
+    ),
     setTimeouts: vi.fn().mockResolvedValue(undefined),
     findElement: vi.fn().mockResolvedValue({
       "element-6066-11e4-a52e-4f735466cecf": "element-99",
@@ -57,17 +70,28 @@ describe("Browser tools", () => {
     (fakeDriver.findElement as any).mockResolvedValue({
       "element-6066-11e4-a52e-4f735466cecf": "element-99",
     });
-    (fakeDriver.executeScript as any).mockResolvedValue({
-      title: "Example Domain",
-      url: "https://example.com/",
-      headings: ["H1: Example Domain"],
-      actionable: [
-        { tag: "a", role: null, text: "More information...", href: "https://www.iana.org/" },
-      ],
-      actionableTotal: 1,
-      body: "This domain is for use in illustrative examples.",
-      bodyTruncated: false,
-    });
+    (fakeDriver.executeScript as any).mockImplementation((script: string) =>
+      Promise.resolve(
+        /readyState/.test(script)
+          ? "complete"
+          : {
+              title: "Example Domain",
+              url: "https://example.com/",
+              headings: ["H1: Example Domain"],
+              actionable: [
+                {
+                  tag: "a",
+                  role: null,
+                  text: "More information...",
+                  href: "https://www.iana.org/",
+                },
+              ],
+              actionableTotal: 1,
+              body: "This domain is for use in illustrative examples.",
+              bodyTruncated: false,
+            }
+      )
+    );
     (mockNewSession as any).mockResolvedValue(fakeDriver);
 
     serverMock = {
@@ -408,6 +432,30 @@ describe("Browser tools", () => {
     if (oldTbS !== undefined) process.env.TB_SECRET = oldTbS;
   });
 
+  // ---- locator building ----------------------------------------------------
+
+  it("tb_click escapes an id that starts with a digit", async () => {
+    await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+    await tools.tb_click.handler({ sessionId: "tb-sess-123", by: "id", value: "2fa-code" });
+    // A leading digit is illegal in a CSS identifier and cannot be
+    // backslash-escaped — it needs the hex form "\32 ".
+    expect(fakeDriver.findElement).toHaveBeenCalledWith("css selector", "#\\32 fa-code");
+  });
+
+  it("tb_click treats a multi-class value as a compound selector", async () => {
+    await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+    await tools.tb_click.handler({ sessionId: "tb-sess-123", by: "class", value: "btn primary" });
+    // ".btn primary" would be a descendant selector; ".btn\ primary" a single
+    // class literally named "btn primary". Neither is what the agent meant.
+    expect(fakeDriver.findElement).toHaveBeenCalledWith("css selector", ".btn.primary");
+  });
+
+  it("tb_click still handles a single class normally", async () => {
+    await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+    await tools.tb_click.handler({ sessionId: "tb-sess-123", by: "class", value: "primary" });
+    expect(fakeDriver.findElement).toHaveBeenCalledWith("css selector", ".primary");
+  });
+
   // ---- tb_navigate ---------------------------------------------------------
 
   it("tb_navigate calls driver.navigateTo and reports title + URL", async () => {
@@ -419,6 +467,91 @@ describe("Browser tools", () => {
     expect(fakeDriver.navigateTo).toHaveBeenCalledWith("https://example.com");
     expect(result.content[0].text).toContain("Example Domain");
     expect(result.content[0].text).toContain("https://example.com/");
+  });
+
+  it("tb_navigate waits for readyState 'complete' by default", async () => {
+    await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+    // Loading twice, then complete — the tool must not return on the first probe.
+    const states = ["loading", "loading", "complete"];
+    (fakeDriver.executeScript as any).mockImplementation((script: string) =>
+      Promise.resolve(/readyState/.test(script) ? (states.shift() ?? "complete") : {})
+    );
+
+    const result = await tools.tb_navigate.handler({
+      sessionId: "tb-sess-123",
+      url: "https://example.com",
+    });
+    expect(states).toHaveLength(0);
+    expect(result.content[0].text).not.toContain("Still loading");
+  });
+
+  it("tb_navigate accepts 'interactive' when waitUntil is domcontentloaded", async () => {
+    await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+    (fakeDriver.executeScript as any).mockImplementation((script: string) =>
+      Promise.resolve(/readyState/.test(script) ? "interactive" : {})
+    );
+
+    const result = await tools.tb_navigate.handler({
+      sessionId: "tb-sess-123",
+      url: "https://example.com",
+      waitUntil: "domcontentloaded",
+      timeoutMs: 500,
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).not.toContain("Still loading");
+  });
+
+  it("tb_navigate skips the readyState probe entirely when waitUntil is none", async () => {
+    await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+    (fakeDriver.executeScript as any).mockClear();
+
+    await tools.tb_navigate.handler({
+      sessionId: "tb-sess-123",
+      url: "https://example.com",
+      waitUntil: "none",
+    });
+    const probes = (fakeDriver.executeScript as any).mock.calls.filter((c: any[]) =>
+      /readyState/.test(String(c[0]))
+    );
+    expect(probes).toHaveLength(0);
+  });
+
+  it("tb_navigate warns instead of failing when the page never finishes loading", async () => {
+    await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+    (fakeDriver.executeScript as any).mockImplementation((script: string) =>
+      Promise.resolve(/readyState/.test(script) ? "loading" : {})
+    );
+
+    const result = await tools.tb_navigate.handler({
+      sessionId: "tb-sess-123",
+      url: "https://example.com",
+      timeoutMs: 150,
+    });
+    // The navigation itself succeeded — failing the call would leave the agent
+    // with nothing to act on, so this is a warning, not an error.
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("Still loading");
+    expect(result.content[0].text).toContain("loading");
+  });
+
+  it("tb_navigate keeps polling when a readyState probe throws mid-navigation", async () => {
+    await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+    let call = 0;
+    (fakeDriver.executeScript as any).mockImplementation((script: string) => {
+      if (!/readyState/.test(script)) return Promise.resolve({});
+      call += 1;
+      // A navigation in flight can transiently destroy the execution context.
+      if (call === 1) return Promise.reject(new Error("execution context destroyed"));
+      return Promise.resolve("complete");
+    });
+
+    const result = await tools.tb_navigate.handler({
+      sessionId: "tb-sess-123",
+      url: "https://example.com",
+      timeoutMs: 2000,
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).not.toContain("Still loading");
   });
 
   it("tb_navigate fails helpfully on unknown sessionId", async () => {

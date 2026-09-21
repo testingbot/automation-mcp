@@ -96,7 +96,8 @@ export class AutomationMcpServer {
   }
 
   public async preflight(): Promise<void> {
-    const required = 18;
+    // Must match `engines.node` in package.json.
+    const required = 20;
     const major = Number(process.versions.node.split(".")[0]);
     if (!Number.isFinite(major) || major < required) {
       throw new Error(`Node.js ${required}+ required; running ${process.versions.node}.`);

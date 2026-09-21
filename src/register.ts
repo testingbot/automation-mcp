@@ -66,8 +66,8 @@ export async function addAutomationTools(
   };
 
   // appium-mcp child + proxied tools. If spawn fails (e.g. appium-mcp not
-  // installed in a slim deployment), we register a single fallback tool that
-  // tells the agent what's wrong, so the rest of the server still works.
+  // installed in a slim deployment), we log and carry on with no mobile tools
+  // at all — mobile is optional, browser must always work.
   let appium: AppiumProxyHandle | null = null;
   let appiumTools: Record<string, unknown> = {};
   try {
