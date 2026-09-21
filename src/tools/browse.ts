@@ -334,14 +334,20 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         const tbOpts: Record<string, unknown> = {};
         if (args.name) tbOpts.name = args.name;
         if (args.build) tbOpts.build = args.build;
-        if (!isMobile && args.screenResolution) tbOpts.screenResolution = args.screenResolution;
+        // TestingBot reads the kebab-case `screen-resolution` key — a camelCase
+        // `screenResolution` is silently ignored and the VM stays at 1280x1024.
+        if (!isMobile && args.screenResolution) tbOpts["screen-resolution"] = args.screenResolution;
         // Physical-device targeting (mobile only). TestingBot defaults to an
         // emulator/simulator unless realDevice is set in tb:options.
         if (realDevice) tbOpts.realDevice = true;
 
         // W3C WebDriver capabilities + TestingBot-specific options.
-        // - Desktop: legacy `platform` + W3C `platformName` so codes like
-        //   "VENTURA" and "macOS Ventura" both work.
+        // - Desktop: W3C `platformName` only. The legacy JSON-Wire `platform`
+        //   key must NOT be sent: the `webdriver` client rejects any non-W3C
+        //   top-level cap (no colon in the name) as soon as an extension cap
+        //   like `tb:options` is present, failing the session before it opens.
+        //   TestingBot accepts its own OS codes ("VENTURA", "WIN11", ...) on
+        //   `platformName` directly.
         // - Mobile: Appium-style `appium:*` caps. TestingBot's hub routes the
         //   session through chromedriver/safaridriver under Appium, so the
         //   resulting WebDriver session behaves like a normal browser — you
@@ -362,7 +368,6 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
               browserName,
               browserVersion,
               platformName: args.platform,
-              platform: args.platform,
               "tb:options": tbOpts,
             };
 

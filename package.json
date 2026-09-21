@@ -55,7 +55,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:integration": "vitest run --dir tests/integration --testTimeout=120000",
+    "test:integration": "vitest run --dir tests/integration --testTimeout=300000 --hookTimeout=180000 --no-file-parallelism",
     "dev:rebuild": "bash scripts/dev.sh",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix",
