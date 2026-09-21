@@ -111,6 +111,48 @@ describe("Browser tools", () => {
     expect(sessions.size()).toBe(1);
   });
 
+  it("tb_openBrowser sends no legacy non-W3C top-level caps (webdriver rejects them)", async () => {
+    await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      browserVersion: "latest",
+      platform: "WIN11",
+      screenResolution: "1920x1080",
+    });
+    const call = (mockNewSession as any).mock.calls[0][0];
+    // The `webdriver` client throws "Invalid or unsupported WebDriver
+    // capabilities found" for any top-level key that is neither a standard W3C
+    // capability nor namespaced with a colon, once an extension cap is present.
+    const w3cKeys = [
+      "acceptInsecureCerts",
+      "browserName",
+      "browserVersion",
+      "pageLoadStrategy",
+      "platformName",
+      "proxy",
+      "setWindowRect",
+      "strictFileInteractability",
+      "timeouts",
+      "unhandledPromptBehavior",
+      "webSocketUrl",
+    ];
+    const invalid = Object.keys(call.capabilities).filter(
+      (cap) => !cap.includes(":") && !w3cKeys.includes(cap)
+    );
+    expect(invalid).toEqual([]);
+  });
+
+  it("tb_openBrowser passes screen resolution as tb:options screen-resolution", async () => {
+    await tools.tb_openBrowser.handler({
+      browserName: "chrome",
+      platform: "WIN11",
+      screenResolution: "1920x1080",
+    });
+    const call = (mockNewSession as any).mock.calls[0][0];
+    // TestingBot only reads the kebab-case key; camelCase is dropped silently.
+    expect(call.capabilities["tb:options"]["screen-resolution"]).toBe("1920x1080");
+    expect(call.capabilities["tb:options"].screenResolution).toBeUndefined();
+  });
+
   it("tb_openBrowser lowercases the browser name in capabilities", async () => {
     await tools.tb_openBrowser.handler({
       browserName: "Safari",
@@ -337,7 +379,7 @@ describe("Browser tools", () => {
       screenResolution: "1080x2400",
     });
     const call = (mockNewSession as any).mock.calls[0][0];
-    expect(call.capabilities["tb:options"].screenResolution).toBeUndefined();
+    expect(call.capabilities["tb:options"]["screen-resolution"]).toBeUndefined();
   });
 
   it("tb_openBrowser errors when credentials are missing", async () => {

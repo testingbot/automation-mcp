@@ -1,0 +1,81 @@
+name: Integration (real TestingBot sessions)
+
+# These tests open REAL TestingBot sessions and burn paid minutes, so they are
+# deliberately kept out of the per-push `Test` workflow. They run once a night
+# and on demand.
+on:
+  schedule:
+    # 03:17 UTC daily — off the hour to avoid the cron stampede on GitHub's
+    # shared runners.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      mobile:
+        description: "Also run the mobile-browser suite (opens a second billable session)"
+        type: boolean
+        default: true
+
+# Never let two paid runs overlap — a queued run waits, it does not double-bill.
+concurrency:
+  group: integration
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    # Never runs on forks: they have no secrets, and we do not want a fork PR
+    # spending our minutes.
+    if: github.repository == 'testingbot/automation-mcp'
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # --allow-git=all: recent npm blocks transitive git dependencies by
+      # default, and appium-mcp pins applesign's fs-walk to a GitHub ref.
+      - name: Install dependencies
+        run: npm ci --allow-git=all
+
+      # Fail loudly rather than silently skipping every test: the suites
+      # self-skip without credentials, which would otherwise report a green run
+      # that verified nothing.
+      - name: Verify credentials are configured
+        env:
+          TB_KEY: ${{ secrets.TB_KEY }}
+          TB_SECRET: ${{ secrets.TB_SECRET }}
+        run: |
+          if [ -z "$TB_KEY" ] || [ -z "$TB_SECRET" ]; then
+            echo "::error::TB_KEY / TB_SECRET repository secrets are not set — integration tests would skip silently."
+            exit 1
+          fi
+          echo "Credentials present."
+
+      - name: Run integration tests
+        env:
+          RUN_INTEGRATION_TESTS: "true"
+          # workflow_dispatch passes a string; scheduled runs have no inputs, so
+          # default the nightly to full coverage including mobile.
+          RUN_MOBILE_INTEGRATION_TESTS: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.mobile }}
+          # The suites accept TESTINGBOT_* or TB_*; pass the canonical names.
+          TESTINGBOT_KEY: ${{ secrets.TB_KEY }}
+          TESTINGBOT_SECRET: ${{ secrets.TB_SECRET }}
+        run: npm run test:integration
+
+      # A crashed run can leave a session billing until TestingBot's ~5 min idle
+      # reaper kills it. The suites close their own sessions in afterAll; this is
+      # the last-resort sweep for a hard failure (OOM, cancelled job).
+      - name: Sweep any leaked sessions
+        if: always()
+        env:
+          TB_KEY: ${{ secrets.TB_KEY }}
+          TB_SECRET: ${{ secrets.TB_SECRET }}
+        run: node scripts/close-stale-sessions.mjs
