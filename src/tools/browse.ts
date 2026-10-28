@@ -106,6 +106,10 @@ function buildLocator(by: LocatorBy, value: string): { using: string; value: str
   }
 }
 
+// Form-state attributes whose live value lives on the DOM property; the HTML
+// attribute only holds the initial value from the markup.
+const LIVE_PROPERTIES = new Set(["value", "checked", "selected"]);
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function findOne(driver: any, by: LocatorBy, value: string): Promise<string> {
   const loc = buildLocator(by, value);
@@ -825,7 +829,12 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         // implicit; leaving pageLoad/script undefined keeps the session defaults.
         await session.driver.setTimeouts(args.timeoutMs ?? 5000);
         const elementId = await findOne(session.driver, args.by ?? "css", args.value);
-        const value = await session.driver.getElementAttribute(elementId, args.attribute);
+        // W3C Get Element Attribute returns the markup value, so an input the
+        // agent just typed into would still report its original `value`. Read
+        // live form state from the DOM property instead.
+        const value = LIVE_PROPERTIES.has(args.attribute)
+          ? await session.driver.getElementProperty(elementId, args.attribute)
+          : await session.driver.getElementAttribute(elementId, args.attribute);
         return {
           content: [
             {

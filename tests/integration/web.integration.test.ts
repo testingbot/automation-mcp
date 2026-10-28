@@ -16,13 +16,16 @@ const describeOrSkip = SHOULD_RUN ? describe : describe.skip;
 // tb:options key is right, not just well-formed.
 const RESOLUTION = "1920x1080";
 
-// A small, fully-controlled form injected into whatever page is loaded. Using
-// our own DOM rather than a third-party page keeps the element-level tools
-// (click / type / getText / getAttribute / pressKey) deterministic.
+// A small, fully-controlled page that replaces whatever was loaded. Using our
+// own DOM rather than a third-party page keeps the element-level tools
+// (click / type / getText / getAttribute / pressKey) deterministic — example.com
+// has already dropped its <h1> once and asks not to be relied on for testing.
 const INJECT_FIXTURE = `
+  document.body.innerHTML = '';
   const host = document.createElement('div');
   host.id = 'tb-fixture';
   host.innerHTML =
+    '<h1 id="tb-heading">Fixture Heading</h1>' +
     '<input id="tb-input" value="preset" data-role="probe" aria-label="Probe input">' +
     '<button id="tb-button" type="button">Press me</button>' +
     '<p id="tb-output">untouched</p>' +
@@ -158,28 +161,11 @@ describeOrSkip("Real browser integration", () => {
     const result = await tools.tb_snapshot.handler({ sessionId });
 
     expect(result.isError).toBeUndefined();
-    const yaml = result.content[0].text as string;
-    expect(yaml).toContain("```yaml");
-    // example.com's structure is stable; "Example Domain" appears in either
-    // the H1 heading or the page title we prefix above the snapshot.
-    expect(yaml.toLowerCase()).toContain("example domain");
-  });
-
-  it("reads element text off the live page", async () => {
-    const result = await tools.tb_getText.handler({ sessionId, by: "css", value: "h1" });
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toMatch(/Example Domain/i);
-  });
-
-  it("reads an element attribute off the live page", async () => {
-    const result = await tools.tb_getAttribute.handler({
-      sessionId,
-      by: "css",
-      value: "a",
-      attribute: "href",
-    });
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain("iana.org");
+    const text = result.content[0].text as string;
+    // Only the title is asserted: example.com's body markup has changed before.
+    expect(text).toMatch(/^# Example Domain/);
+    expect(text).toContain("URL: https://example.com/");
+    expect(text).toContain("## Body text");
   });
 
   // ---- element interaction (against an injected, deterministic fixture) -----
@@ -191,6 +177,23 @@ describeOrSkip("Real browser integration", () => {
     });
     expect(result.isError).toBeUndefined();
     expect(JSON.parse(result.content[0].text as string)).toBe("injected");
+  });
+
+  it("reads element text off the live page", async () => {
+    const result = await tools.tb_getText.handler({ sessionId, by: "css", value: "h1" });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toBe("Fixture Heading");
+  });
+
+  it("reads an element attribute off the live page", async () => {
+    const result = await tools.tb_getAttribute.handler({
+      sessionId,
+      by: "css",
+      value: "#tb-input",
+      attribute: "data-role",
+    });
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toBe("probe");
   });
 
   it("passes positional arguments through to the page", async () => {
@@ -304,10 +307,12 @@ describeOrSkip("Real browser integration", () => {
     const result = await tools.tb_screenshot.handler({ sessionId });
 
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].type).toBe("image");
-    expect(result.content[0].mimeType).toBe("image/png");
+    // content[0] is the saved-file note; the image block follows it.
+    const image = result.content.find((c: any) => c.type === "image");
+    expect(image).toBeDefined();
+    expect(image.mimeType).toBe("image/png");
     // PNG header magic bytes when decoded: 0x89 0x50 0x4E 0x47.
-    const buf = Buffer.from(result.content[0].data, "base64");
+    const buf = Buffer.from(image.data, "base64");
     expect(buf[0]).toBe(0x89);
     expect(buf[1]).toBe(0x50);
     expect(buf[2]).toBe(0x4e);

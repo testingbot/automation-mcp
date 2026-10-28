@@ -41,6 +41,7 @@ const { fakeDriver, mockNewSession } = vi.hoisted(() => {
     elementSendKeys: vi.fn().mockResolvedValue(undefined),
     getElementText: vi.fn().mockResolvedValue("hello world"),
     getElementAttribute: vi.fn().mockResolvedValue("https://example.com"),
+    getElementProperty: vi.fn().mockResolvedValue("typed-value"),
     takeScreenshot: vi.fn().mockResolvedValue("UE5HREFUQQ=="),
     deleteSession: vi.fn().mockResolvedValue(undefined),
   };
@@ -671,6 +672,18 @@ describe("Browser tools", () => {
     });
     expect(fakeDriver.getElementAttribute).toHaveBeenCalledWith("element-99", "href");
     expect(result.content[0].text).toBe("https://example.com");
+  });
+
+  it("tb_getAttribute reads live form state from the DOM property, not the markup", async () => {
+    await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+    const result = await tools.tb_getAttribute.handler({
+      sessionId: "tb-sess-123",
+      value: "#q",
+      attribute: "value",
+    });
+    expect(fakeDriver.getElementProperty).toHaveBeenCalledWith("element-99", "value");
+    expect(fakeDriver.getElementAttribute).not.toHaveBeenCalled();
+    expect(result.content[0].text).toBe("typed-value");
   });
 
   it("tb_getAttribute reports missing attributes clearly", async () => {
