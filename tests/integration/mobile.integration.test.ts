@@ -102,8 +102,16 @@ describeOrSkip("Real mobile-browser integration (Android emulator)", () => {
     expect(nav.isError).toBeUndefined();
     expect(nav.content[0].text).toMatch(/Example Domain/i);
 
-    const text = await tools.tb_getText.handler({ sessionId, by: "css", value: "h1" });
-    expect(text.content[0].text).toMatch(/Example Domain/i);
+    // example.com's body markup isn't stable, so plant our own element to read.
+    await tools.tb_executeScript.handler({
+      sessionId,
+      script:
+        "const h = document.createElement('h1'); h.id = 'tb-heading';" +
+        "h.textContent = 'Fixture Heading'; document.body.appendChild(h); return true;",
+    });
+    const text = await tools.tb_getText.handler({ sessionId, by: "id", value: "tb-heading" });
+    expect(text.isError).toBeUndefined();
+    expect(text.content[0].text).toBe("Fixture Heading");
 
     const snap = await tools.tb_snapshot.handler({ sessionId });
     expect(snap.isError).toBeUndefined();
@@ -122,8 +130,10 @@ describeOrSkip("Real mobile-browser integration (Android emulator)", () => {
   it("captures a screenshot from the device", async () => {
     const result = await tools.tb_screenshot.handler({ sessionId });
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].mimeType).toBe("image/png");
-    expect(Buffer.from(result.content[0].data, "base64").length).toBeGreaterThan(1000);
+    // content[0] is the saved-file note; the image block follows it.
+    const image = result.content.find((c: any) => c.type === "image");
+    expect(image?.mimeType).toBe("image/png");
+    expect(Buffer.from(image.data, "base64").length).toBeGreaterThan(1000);
   });
 
   it("closes the mobile session", async () => {
