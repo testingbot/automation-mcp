@@ -176,6 +176,22 @@ const normalizeVersion = (s: unknown): string =>
     .trim()
     .replace(/(\.0+)+$/, "");
 
+// The hub reads deviceName / platformVersion as regexes ("iPhone (16|17).*",
+// "26.*"). A lone "." is left out of the trigger set: it's ordinary in plain
+// versions like "16.4", which must keep the lenient normalizeVersion compare.
+const REGEX_META = /[*+?^${}()|[\]\\]/;
+
+/** Compile `value` as a case-insensitive pattern if it uses regex syntax.
+ *  Returns undefined for a plain value, null for an invalid pattern. */
+function asPattern(value: string | undefined): RegExp | null | undefined {
+  if (!value || !REGEX_META.test(value)) return undefined;
+  try {
+    return new RegExp(value, "i");
+  } catch {
+    return null;
+  }
+}
+
 // Parse a possibly-stringified boolean. MCP clients sometimes serialize booleans
 // as the strings "true"/"false"; a bare truthiness check would treat "false" as
 // true. Returns true only for real true / "true".
@@ -216,13 +232,27 @@ async function realDeviceUnavailableMessage(
   const wantPlatform = normalizeDeviceToken(platform);
   const wantVersion = platformVersion ? normalizeVersion(platformVersion) : "";
   if (!wantName) return null;
+  const namePattern = asPattern(deviceName);
+  const versionPattern = asPattern(platformVersion);
+  // A pattern we can't compile is the hub's to judge, not ours.
+  if (namePattern === null || versionPattern === null) return null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nameMatches = (d: any): boolean => {
+    if (namePattern) return namePattern.test(String(d.name ?? ""));
     const n = normalizeDeviceToken(d.name);
     return !!n && (n === wantName || n.includes(wantName) || wantName.includes(n));
   };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const versionMatches = (d: any): boolean =>
+    versionPattern
+      ? versionPattern.test(String(d.version ?? ""))
+      : normalizeVersion(d.version) === wantVersion;
 
   const byName = devices.filter(nameMatches);
+  // Our match may not mirror the hub's regex semantics exactly, so a pattern
+  // that finds nothing proceeds rather than blocking a request the hub may serve.
+  const usesPattern = !!(namePattern || versionPattern);
+  if (byName.length === 0 && namePattern) return null;
 
   const alternatives = devices
     .filter(
@@ -258,7 +288,8 @@ async function realDeviceUnavailableMessage(
   // caller exactly which versions this device IS offered on (so the agent stops
   // guessing) and which are available now.
   if (wantVersion) {
-    const exact = byName.filter((d) => normalizeVersion(d.version) === wantVersion);
+    const exact = byName.filter(versionMatches);
+    if (exact.length === 0 && usesPattern) return null;
     if (exact.length === 0) {
       const offered = byName
         .map((d) => `  - ${d.name} ${d.version}${d.available ? " (available)" : " (busy)"}`)

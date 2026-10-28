@@ -329,6 +329,74 @@ describe("Browser tools", () => {
     expect(mockNewSession).toHaveBeenCalledOnce();
   });
 
+  // ---- regex deviceName / platformVersion (issue #6) ----------------------
+
+  const IPHONES = [
+    { name: "iPhone 16", platform_name: "iOS", version: "18.0", available: false },
+    { name: "iPhone 17", platform_name: "iOS", version: "26.0", available: true },
+    { name: "iPhone Air", platform_name: "iOS", version: "26.1", available: true },
+  ];
+
+  it("tb_openBrowser matches a regex deviceName against the catalog the way the hub does", async () => {
+    // Token-stripping turned "iPhone (16|17|Air).*" into "iphone1617air", which
+    // only matched the busy iPhone 16 and refused a request the hub would serve.
+    testingBotApi.getDevices = vi.fn().mockResolvedValue(IPHONES);
+    await tools.tb_openBrowser.handler({
+      browserName: "safari",
+      platform: "iOS",
+      deviceName: "iPhone (16|17|Air).*",
+      realDevice: true,
+    });
+    expect(mockNewSession).toHaveBeenCalledOnce();
+  });
+
+  it("tb_openBrowser still reports busy when every device a regex matches is busy", async () => {
+    testingBotApi.getDevices = vi.fn().mockResolvedValue(IPHONES);
+    const result = await tools.tb_openBrowser.handler({
+      browserName: "safari",
+      platform: "iOS",
+      deviceName: "iPhone 1[56].*",
+      realDevice: true,
+    });
+    expect(mockNewSession).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain("busy");
+  });
+
+  it("tb_openBrowser matches a regex platformVersion instead of comparing it exactly", async () => {
+    testingBotApi.getDevices = vi.fn().mockResolvedValue(IPHONES);
+    await tools.tb_openBrowser.handler({
+      browserName: "safari",
+      platform: "iOS",
+      deviceName: "iPhone 17",
+      platformVersion: "26.*",
+      realDevice: true,
+    });
+    expect(mockNewSession).toHaveBeenCalledOnce();
+  });
+
+  it("tb_openBrowser defers to the hub when a regex matches nothing in the catalog", async () => {
+    testingBotApi.getDevices = vi.fn().mockResolvedValue(IPHONES);
+    await tools.tb_openBrowser.handler({
+      browserName: "safari",
+      platform: "iOS",
+      deviceName: "iPhone 17",
+      platformVersion: "2[7-9].*",
+      realDevice: true,
+    });
+    expect(mockNewSession).toHaveBeenCalledOnce();
+  });
+
+  it("tb_openBrowser defers to the hub when the deviceName is an invalid regex", async () => {
+    testingBotApi.getDevices = vi.fn().mockResolvedValue(IPHONES);
+    await tools.tb_openBrowser.handler({
+      browserName: "safari",
+      platform: "iOS",
+      deviceName: "iPhone (17",
+      realDevice: true,
+    });
+    expect(mockNewSession).toHaveBeenCalledOnce();
+  });
+
   it("tb_openBrowser coerces a stringified realDevice:'true' into a real-device session", async () => {
     testingBotApi.getDevices = vi
       .fn()
