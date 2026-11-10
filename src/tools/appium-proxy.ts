@@ -173,6 +173,7 @@ export function applyAgentSteering(name: string, upstreamDescription: string): s
       "Reserve this tool for testing NATIVE apps (.apk/.ipa). " +
       'Open a session with `action: "create"`, supplying `platform` (`ios` or `android`) and `capabilities` (a JSON string with appium:deviceName, appium:platformVersion, appium:app etc.). ' +
       "**The TestingBot hub URL and credentials are injected for you — do not supply remoteServerUrl, it is not a parameter of this tool.** " +
+      'If the app must reach a localhost / private-network backend, add `"tb:options": {"tunnel-identifier": "<id>"}` to the capabilities, naming a running TestingBot Tunnel. ' +
       'Close with `action: "delete"` when done; sessions burn TestingBot minutes.'
     );
   }

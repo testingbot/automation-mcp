@@ -105,6 +105,7 @@ describe("tb_openBrowser capability contract (real webdriver client, stub hub)",
       name: "contract",
       build: "b1",
       screenResolution: "1920x1080",
+      tunnelIdentifier: "contract-tunnel",
     });
 
     // A rejected capability set surfaces as an isError result, not a throw.
@@ -119,6 +120,8 @@ describe("tb_openBrowser capability contract (real webdriver client, stub hub)",
     expect(always["tb:options"]["screen-resolution"]).toBe("1920x1080");
     expect(always["tb:options"].name).toBe("contract");
     expect(always["tb:options"].build).toBe("b1");
+    // The hub reads the kebab-case key; it reaches the wire inside tb:options.
+    expect(always["tb:options"]["tunnel-identifier"]).toBe("contract-tunnel");
   });
 
   it("opens a mobile session the real client accepts", async () => {

@@ -89,6 +89,17 @@ await handle.shutdown();
 
 The library entry expects the same `server.tool(name, desc, schema, handler)` duck-type used by `@testingbot/mcp-server`'s other tool families.
 
+## Testing localhost and private sites
+
+The remote browsers run in TestingBot's cloud, so `localhost`, `127.0.0.1`, private IPs and intranet hosts are only reachable through a running [TestingBot Tunnel](https://testingbot.com/support/tunnel). The hub only sends a session through a tunnel when the session names it:
+
+1. Start the tunnel with an identifier: `java -jar testingbot-tunnel.jar key secret --tunnel-identifier my-tunnel` (or use `startTunnel` in [`@testingbot/mcp-server`](https://github.com/testingbot/mcp-server)).
+2. Pass `tunnelIdentifier: "my-tunnel"` to `tb_openBrowser`, or set `TESTINGBOT_TUNNEL_IDENTIFIER=my-tunnel` in the server's environment to use it for every session.
+
+It is sent as `tb:options["tunnel-identifier"]`. For native-app sessions, add `"tb:options": {"tunnel-identifier": "my-tunnel"}` to the `appium_session_management` capabilities.
+
+A session without an identifier connects directly and cannot load local URLs. If the identifier does not match a running tunnel, the session still starts, but without the tunnel.
+
 ## Live view (the killer feature)
 
 Every `tb_openBrowser` response includes:
