@@ -352,7 +352,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_openBrowser = server.tool(
     "tb_openBrowser",
-    "Start a remote browser session on TestingBot via WebDriver. Handles BOTH desktop browsers (Chrome/Edge/Safari/Firefox on Win/macOS/Linux) AND mobile browsers (Chrome on Android, Safari on iOS). For a mobile browser task, set `deviceName` and `platformVersion` — the session is still WebDriver/chromedriver-backed, so tb_navigate / tb_snapshot / tb_screenshot / tb_click work directly with no native-context juggling. By default a mobile session runs on an EMULATOR (Android) / SIMULATOR (iOS); set `realDevice: true` to run on a physical device instead — ALWAYS do this when the user asks for a 'real device', 'physical device', or 'real hardware'. **Prefer this over appium_session_management for any task whose goal is loading a web page in a browser**, even on mobile. Reserve appium_session_management for native-app testing (.apk/.ipa). Returns a sessionId for subsequent tool calls and a liveViewUrl the human can open to watch the agent drive in real time. Burns TestingBot minutes — call tb_closeBrowser when done.",
+    "Start a remote browser session on TestingBot via WebDriver. Handles BOTH desktop browsers (Chrome/Edge/Safari/Firefox on Win/macOS/Linux) AND mobile browsers (Chrome on Android, Safari on iOS). For a mobile browser task, set `deviceName` and `platformVersion` — the session is still WebDriver/chromedriver-backed, so tb_navigate / tb_snapshot / tb_screenshot / tb_click work directly with no native-context juggling. By default a mobile session runs on an EMULATOR (Android) / SIMULATOR (iOS); set `realDevice: true` to run on a physical device instead — ALWAYS do this when the user asks for a 'real device', 'physical device', or 'real hardware'. **Prefer this over appium_session_management for any task whose goal is loading a web page in a browser**, even on mobile. Reserve appium_session_management for native-app testing (.apk/.ipa). **Local or private sites** (localhost, 127.0.0.1, 10.x/192.168.x, intranet hosts): the remote browser can only reach these through a running TestingBot Tunnel, and only when this session names that tunnel via `tunnelIdentifier` — without it the session silently goes direct and the page fails to load. Returns a sessionId for subsequent tool calls and a liveViewUrl the human can open to watch the agent drive in real time. Burns TestingBot minutes — call tb_closeBrowser when done.",
     {
       browserName: z
         .enum(["chrome", "firefox", "edge", "safari", "Chrome", "Firefox", "Edge", "Safari"])
@@ -400,6 +400,12 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         .describe(
           "Screen resolution for desktop sessions (e.g., '1920x1080'). Ignored for mobile."
         ),
+      tunnelIdentifier: z
+        .string()
+        .optional()
+        .describe(
+          "Identifier of a running TestingBot Tunnel (the value it was started with via --tunnel-identifier, or the one startTunnel returned) to route this session through. REQUIRED to open localhost / private-network URLs. Defaults to the TESTINGBOT_TUNNEL_IDENTIFIER environment variable when set."
+        ),
     },
     async (args: {
       browserName: string;
@@ -412,6 +418,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
       name?: string;
       build?: string;
       screenResolution?: string;
+      tunnelIdentifier?: string;
     }) => {
       try {
         if (!key || !secret) {
@@ -436,6 +443,17 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
         // Physical-device targeting (mobile only). TestingBot defaults to an
         // emulator/simulator unless realDevice is set in tb:options.
         if (realDevice) tbOpts.realDevice = true;
+        // Tunnel routing. The hub only proxies a session through a tunnel when the
+        // session names it: `tunnel-identifier` (read from tb:options, which the
+        // hub flattens into the desired caps). Without it the session goes direct
+        // and localhost URLs fail — and an unknown identifier is not an error on
+        // the hub, it just starts the session without a tunnel.
+        const tunnelIdentifier = (
+          args.tunnelIdentifier ??
+          process.env.TESTINGBOT_TUNNEL_IDENTIFIER ??
+          ""
+        ).trim();
+        if (tunnelIdentifier) tbOpts["tunnel-identifier"] = tunnelIdentifier;
 
         // W3C WebDriver capabilities + TestingBot-specific options.
         // - Desktop: W3C `platformName` only. The legacy JSON-Wire `platform`
@@ -520,6 +538,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
           ? `- **Device**: ${args.deviceName}${args.platformVersion ? ` (${args.platform} ${args.platformVersion})` : ` (${args.platform})`} — ${deviceKind}\n`
           : `- **Browser**: ${browserName} ${browserVersion} on ${args.platform}\n`;
         const browserLine = isMobile ? `- **Browser**: ${browserName}\n` : "";
+        const tunnelLine = tunnelIdentifier ? `- **Tunnel**: \`${tunnelIdentifier}\`\n` : "";
 
         return {
           content: [
@@ -530,6 +549,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
                 `- **Session ID**: \`${id}\`\n` +
                 deviceLine +
                 browserLine +
+                tunnelLine +
                 `- **Live view** (open in a browser tab to watch): ${liveViewUrl}\n\n` +
                 `Use this sessionId for tb_navigate / tb_click / tb_snapshot / tb_screenshot. Call tb_closeBrowser when done — sessions burn minutes.`,
             },
@@ -546,7 +566,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_navigate = server.tool(
     "tb_navigate",
-    "Navigate the session's browser to a URL. By default it waits for the page to finish loading; use `waitUntil` to return earlier on a slow page.",
+    "Navigate the session's browser to a URL. By default it waits for the page to finish loading; use `waitUntil` to return earlier on a slow page. localhost / private-network URLs only load when the session was opened with `tunnelIdentifier` (see tb_openBrowser).",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       url: z.string().url().describe("URL to navigate to"),

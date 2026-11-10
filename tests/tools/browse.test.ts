@@ -178,6 +178,65 @@ describe("Browser tools", () => {
     expect(call.capabilities["tb:options"].screenResolution).toBeUndefined();
   });
 
+  describe("tunnel routing", () => {
+    const saved = process.env.TESTINGBOT_TUNNEL_IDENTIFIER;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.TESTINGBOT_TUNNEL_IDENTIFIER;
+      else process.env.TESTINGBOT_TUNNEL_IDENTIFIER = saved;
+    });
+
+    it("passes tunnelIdentifier as tb:options tunnel-identifier", async () => {
+      delete process.env.TESTINGBOT_TUNNEL_IDENTIFIER;
+      const result = await tools.tb_openBrowser.handler({
+        browserName: "chrome",
+        platform: "WIN11",
+        tunnelIdentifier: "my-tunnel",
+      });
+      const call = (mockNewSession as any).mock.calls[0][0];
+      // The hub reads the kebab-case key (tb:options is flattened into the caps).
+      expect(call.capabilities["tb:options"]["tunnel-identifier"]).toBe("my-tunnel");
+      expect(result.content[0].text).toContain("my-tunnel");
+    });
+
+    it("puts the tunnel on mobile-browser sessions too", async () => {
+      delete process.env.TESTINGBOT_TUNNEL_IDENTIFIER;
+      await tools.tb_openBrowser.handler({
+        browserName: "chrome",
+        platform: "Android",
+        deviceName: "Pixel 8",
+        platformVersion: "14",
+        tunnelIdentifier: "mobile-tunnel",
+      });
+      const call = (mockNewSession as any).mock.calls[0][0];
+      expect(call.capabilities["tb:options"]["tunnel-identifier"]).toBe("mobile-tunnel");
+    });
+
+    it("falls back to TESTINGBOT_TUNNEL_IDENTIFIER", async () => {
+      process.env.TESTINGBOT_TUNNEL_IDENTIFIER = "from-env";
+      await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+      const call = (mockNewSession as any).mock.calls[0][0];
+      expect(call.capabilities["tb:options"]["tunnel-identifier"]).toBe("from-env");
+    });
+
+    it("prefers the explicit argument over the env var", async () => {
+      process.env.TESTINGBOT_TUNNEL_IDENTIFIER = "from-env";
+      await tools.tb_openBrowser.handler({
+        browserName: "chrome",
+        platform: "WIN11",
+        tunnelIdentifier: "explicit",
+      });
+      const call = (mockNewSession as any).mock.calls[0][0];
+      expect(call.capabilities["tb:options"]["tunnel-identifier"]).toBe("explicit");
+    });
+
+    it("sends no tunnel-identifier when none is given", async () => {
+      delete process.env.TESTINGBOT_TUNNEL_IDENTIFIER;
+      await tools.tb_openBrowser.handler({ browserName: "chrome", platform: "WIN11" });
+      const call = (mockNewSession as any).mock.calls[0][0];
+      expect(call.capabilities["tb:options"]).not.toHaveProperty("tunnel-identifier");
+    });
+  });
+
   it("tb_openBrowser lowercases the browser name in capabilities", async () => {
     await tools.tb_openBrowser.handler({
       browserName: "Safari",
