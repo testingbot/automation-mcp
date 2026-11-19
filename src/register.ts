@@ -27,6 +27,12 @@ import logger from "./lib/logger.js";
 
 export type { AutomationOptions, TestingBotConfig };
 export { SessionManager };
+export {
+  toolInputSchema,
+  parseToolArgs,
+  invalidArgsResult,
+  type ParsedToolArgs,
+} from "./lib/tool-schema.js";
 
 export interface AutomationHandle {
   /** Map of registered tools, keyed by tool name. */

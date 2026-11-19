@@ -108,6 +108,15 @@ export function buildRemoteServerUrl(config: TestingBotConfig): string {
   return `https://${u}:${s}@${HUB_HOST}${HUB_PATH}`;
 }
 
+/** This package's version, as reported to the appium-mcp child. */
+function packageVersion(): string {
+  try {
+    return require("../../package.json").version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
 /** Locate the appium-mcp entry without depending on $PATH or shell resolution. */
 export function resolveAppiumMcpEntry(): string {
   // appium-mcp's exports map exposes "." only via the `import` condition
@@ -131,7 +140,7 @@ async function defaultSpawn(
   });
 
   const client = new Client(
-    { name: "@testingbot/automation-mcp", version: "0.1.0" },
+    { name: "@testingbot/automation-mcp", version: packageVersion() },
     { capabilities: {} }
   );
 
