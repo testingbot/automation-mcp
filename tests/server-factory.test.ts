@@ -9,6 +9,7 @@ vi.mock("webdriver", () => ({
 }));
 
 import { AutomationMcpServer } from "../src/server-factory.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { ProxyClientLike } from "../src/lib/types.js";
 
 function fakeSpawn(toolNames: string[]) {
@@ -129,5 +130,45 @@ describe("AutomationMcpServer", () => {
     expect(Object.keys(server.tools)).toEqual(
       expect.arrayContaining(["tb_openBrowser", "appium_session_management", "appium_gesture"])
     );
+  });
+
+  async function startedServer() {
+    setNodeVersion("20.10.0");
+    const server = new AutomationMcpServer(testingBotApi, config, {
+      appiumSpawn: fakeSpawn(["appium_gesture"]),
+    });
+    (server as any).server.connect = vi.fn().mockResolvedValue(undefined);
+    await server.run();
+    const handlers = (server as any).server._requestHandlers;
+    const call = (method: string, params: any) =>
+      handlers.get(method)({ method, params }, { signal: new AbortController().signal });
+    return { server, call };
+  }
+
+  it("tools/list publishes JSON Schema, not Zod internals", async () => {
+    const { server, call } = await startedServer();
+    const { tools } = await call(ListToolsRequestSchema.shape.method.value, {});
+    const navigate = tools.find((t: any) => t.name === "tb_navigate");
+    expect(navigate.inputSchema.properties.url).toMatchObject({ type: "string", format: "uri" });
+    expect(navigate.inputSchema.required).toEqual(expect.arrayContaining(["sessionId", "url"]));
+    expect(JSON.stringify(tools)).not.toContain('"def"');
+    // Proxied tools keep the raw schema appium-mcp sent.
+    expect(tools.find((t: any) => t.name === "appium_gesture").inputSchema).toEqual({
+      type: "object",
+    });
+    await server.close();
+  });
+
+  it("tools/call rejects missing arguments with a clear message", async () => {
+    const { server, call } = await startedServer();
+    const result = await call(CallToolRequestSchema.shape.method.value, {
+      name: "tb_navigate",
+      arguments: {},
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/^Invalid arguments for tb_navigate: /);
+    expect(result.content[0].text).toContain("sessionId");
+    expect(result.content[0].text).toContain("url");
+    await server.close();
   });
 });
