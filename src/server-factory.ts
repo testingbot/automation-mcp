@@ -5,6 +5,7 @@ import { createRequire } from "module";
 import logger from "./lib/logger.js";
 import type { TestingBotConfig, AutomationOptions } from "./lib/types.js";
 import { addAutomationTools, type AutomationHandle } from "./register.js";
+import { invalidArgsResult, parseToolArgs, toolInputSchema } from "./lib/tool-schema.js";
 
 const require = createRequire(import.meta.url);
 const packageJson = require("../package.json");
@@ -62,15 +63,8 @@ export class AutomationMcpServer {
         name: t.name,
         description: t.description,
         // Proxied appium-mcp tools stash a raw JSON Schema on the tool object.
-        // Honor it when present; otherwise serialize the Zod-style schema dict.
-        inputSchema: t.inputSchema ?? {
-          type: "object",
-          properties: t.schema,
-          required: Object.keys(t.schema).filter(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (k) => !(t.schema as any)[k].isOptional?.()
-          ),
-        },
+        // Honor it when present; otherwise convert the tool's Zod shape.
+        inputSchema: t.inputSchema ?? toolInputSchema(t.schema),
       })),
     }));
 
@@ -80,7 +74,11 @@ export class AutomationMcpServer {
       logger.info({ tool: toolName, args: toolArgs }, "Tool called");
       const tool = this.tools[toolName];
       if (!tool) throw new Error(`Tool not found: ${toolName}`);
-      return tool.handler(toolArgs);
+      // Proxied tools are checked by appium-mcp itself.
+      if (tool.inputSchema) return tool.handler(toolArgs);
+      const parsed = parseToolArgs(tool.schema, toolArgs);
+      if (!parsed.success) return invalidArgsResult(toolName, parsed.message);
+      return tool.handler(parsed.data);
     });
   }
 
