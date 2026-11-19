@@ -159,6 +159,33 @@ describe("AutomationMcpServer", () => {
     await server.close();
   });
 
+  it("tools/list annotates every tool", async () => {
+    const { server, call } = await startedServer();
+    const { tools } = await call(ListToolsRequestSchema.shape.method.value, {});
+    for (const tool of tools) {
+      expect(tool.annotations, tool.name).toBeDefined();
+      // Everything talks to TestingBot except listing this server's own sessions.
+      expect(tool.annotations.openWorldHint, tool.name).toBe(tool.name !== "tb_listSessions");
+    }
+    const byName = Object.fromEntries(tools.map((t: any) => [t.name, t.annotations]));
+    expect(byName.tb_snapshot).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+    expect(byName.tb_closeBrowser).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    expect(byName.tb_click).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+    await server.close();
+  });
+
+  it("tb_* descriptions say when to use the tool and what it returns", async () => {
+    const { server, call } = await startedServer();
+    const { tools } = await call(ListToolsRequestSchema.shape.method.value, {});
+    for (const tool of tools.filter((t: any) => t.name.startsWith("tb_"))) {
+      expect(tool.description.length, tool.name).toBeGreaterThan(200);
+      if (tool.annotations.destructiveHint) {
+        expect(tool.description, tool.name).toMatch(/end|close|change|delete|side effect/i);
+      }
+    }
+    await server.close();
+  });
+
   it("tools/call rejects missing arguments with a clear message", async () => {
     const { server, call } = await startedServer();
     const result = await call(CallToolRequestSchema.shape.method.value, {

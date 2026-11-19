@@ -65,6 +65,7 @@ export class AutomationMcpServer {
         // Proxied appium-mcp tools stash a raw JSON Schema on the tool object.
         // Honor it when present; otherwise convert the tool's Zod shape.
         inputSchema: t.inputSchema ?? toolInputSchema(t.schema),
+        ...(t.annotations ? { annotations: t.annotations } : {}),
       })),
     }));
 

@@ -24,9 +24,17 @@ import addAppiumProxyTools, { type AppiumProxyHandle } from "./tools/appium-prox
 import { SessionManager, type SessionManagerOptions } from "./session-manager.js";
 import type { TestingBotConfig, AutomationOptions } from "./lib/types.js";
 import logger from "./lib/logger.js";
+import { BROWSER_TOOL_ANNOTATIONS, type ToolAnnotations } from "./lib/annotations.js";
 
 export type { AutomationOptions, TestingBotConfig };
 export { SessionManager };
+export {
+  READ,
+  WRITE,
+  WRITE_IDEMPOTENT,
+  DESTRUCTIVE,
+  type ToolAnnotations,
+} from "./lib/annotations.js";
 export {
   toolInputSchema,
   parseToolArgs,
@@ -70,6 +78,12 @@ export async function addAutomationTools(
     ...addBrowseTools(server, testingBotApi, sessions),
     ...addSharedTools(server, sessions),
   };
+  for (const [name, tool] of Object.entries(localTools)) {
+    const annotations = BROWSER_TOOL_ANNOTATIONS[name];
+    if (annotations && tool && typeof tool === "object") {
+      (tool as { annotations?: ToolAnnotations }).annotations = annotations;
+    }
+  }
 
   // appium-mcp child + proxied tools. If spawn fails (e.g. appium-mcp not
   // installed in a slim deployment), we log and carry on with no mobile tools

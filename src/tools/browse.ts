@@ -566,7 +566,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_navigate = server.tool(
     "tb_navigate",
-    "Navigate the session's browser to a URL. By default it waits for the page to finish loading; use `waitUntil` to return earlier on a slow page. localhost / private-network URLs only load when the session was opened with `tunnelIdentifier` (see tb_openBrowser).",
+    "Load a URL in an open browser session (from tb_openBrowser). Use it for every page change; follow with tb_snapshot to see the result. By default it waits for the page to finish loading; `waitUntil` returns earlier on slow pages. Returns the page title and final URL (after redirects), plus a warning if the page was still loading at the timeout. localhost / private-network URLs only load when the session was opened with `tunnelIdentifier`; otherwise the page fails to load.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       url: z.string().url().describe("URL to navigate to"),
@@ -628,7 +628,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_snapshot = server.tool(
     "tb_snapshot",
-    "Return a structured snapshot of the current page: title, URL, headings, links/buttons with their text, and a truncated body. Use this as the agent's 'see the page' primitive before deciding what to click.",
+    "Describe the current page of a browser session: title, URL, headings, the text of links and buttons, and the start of the body text (`bodyChars`, default 5000). Read-only. Call it after tb_navigate or any interaction to decide what to click or type next; it is cheaper and more useful to an agent than tb_screenshot. To check one element, tb_getText is cheaper still.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       bodyChars: z
@@ -721,7 +721,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_click = server.tool(
     "tb_click",
-    "Click an element. Use `by` to pick a locator strategy (css/xpath/id/name/tag/class/linkText/partialLinkText).",
+    "Click one element in a browser session. Use it for links, buttons, checkboxes and other clickable controls; to fill a field use tb_type, for keyboard input tb_pressKey, and tb_executeScript only for what normal clicks cannot do. Find the locator with tb_snapshot first. `by` picks the strategy (css by default, or xpath/id/name/tag/class/linkText/partialLinkText) and `value` is the selector. Waits up to `timeoutMs` (default 5000) for the element to exist; if none matches it returns an error and clicks nothing. The click can navigate or change the page; run tb_snapshot afterwards to see the result. Returns a confirmation only.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       by: z.enum(LOCATOR_KEYS).optional().default("css").describe("Locator strategy (default css)"),
@@ -763,7 +763,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_type = server.tool(
     "tb_type",
-    "Type text into an input. Uses the same locator strategies as tb_click. Clears the field first by default.",
+    "Type text into an input, textarea or other editable element in a browser session. Locate it the same way as tb_click (`by`, default css, plus `value`). Clears the field first unless `clearFirst` is false; `pressEnter: true` submits after typing (e.g. a search box). Waits up to 5 seconds for the element and returns an error if none matches. Returns a confirmation; read the field back with tb_getAttribute (`value`) if you need to verify it.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       by: z.enum(LOCATOR_KEYS).optional().default("css").describe("Locator strategy (default css)"),
@@ -814,7 +814,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_getText = server.tool(
     "tb_getText",
-    "Read the visible text of an element. Cheaper than tb_snapshot when you just need to verify a single label / status.",
+    "Return the visible text of one element in a browser session, for example to check a heading, status message or price. Read-only. Cheaper than tb_snapshot when you know which element to check. Locate it like tb_click (`by`, default css, plus `value`); waits up to `timeoutMs` (default 5000) and returns an error if none matches. Hidden text is not included; use tb_getAttribute for attributes or form values.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       by: z.enum(LOCATOR_KEYS).optional().default("css").describe("Locator strategy"),
@@ -850,7 +850,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_getAttribute = server.tool(
     "tb_getAttribute",
-    "Read an attribute of an element (e.g. 'href', 'value', 'aria-label', 'class', 'data-*').",
+    "Return one attribute of an element in a browser session, e.g. `href`, `aria-label`, `class` or `data-*`. Read-only. `value`, `checked` and `selected` return the live form state (what the user typed or ticked), not the original markup. Locate the element like tb_click (`by`, default css, plus `value`); waits up to `timeoutMs` (default 5000) and returns an error if none matches. Returns the attribute value as text, or a note that the attribute is not set. For visible text use tb_getText.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       by: z.enum(LOCATOR_KEYS).optional().default("css").describe("Locator strategy"),
@@ -905,7 +905,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_executeScript = server.tool(
     "tb_executeScript",
-    "Execute a JavaScript snippet in the active page and return its result. The script body is wrapped as a function — use `return` to send a value back. Args are passed positionally via `arguments[0]`, `arguments[1]`, ...",
+    "Run JavaScript in the current page of a browser session and return its result as JSON. Use it only when no other tb_* tool fits, e.g. to read `localStorage`, scroll an element into view or inspect computed styles. The script runs as a function body in the page, with the page's full privileges: it can change the page or submit data, so avoid side effects unless intended. Use `return` to send a value back; `args` are available as `arguments[0]`, `arguments[1]`, .... Script errors are returned as tool errors.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       script: z.string().min(1).describe("JS body, e.g. 'return document.title'"),
@@ -937,7 +937,7 @@ export default function addBrowseTools(server: any, testingBotApi: any, sessions
   // ---------------------------------------------------------------------------
   tools.tb_closeBrowser = server.tool(
     "tb_closeBrowser",
-    "Close a remote browser session. Releases TestingBot minutes. For mobile device sessions, use appium-mcp's `appium_session_management` with `action: 'delete'`.",
+    'End a browser session opened with tb_openBrowser and stop billing TestingBot minutes for it. Call it as soon as the task is done; idle sessions are also closed automatically (after 4 minutes by default). Safe to call twice: an unknown or already closed `sessionId` is reported, not an error. The recorded test (video, logs) stays available in TestingBot. For native-app sessions use appium_session_management with `action: "delete"` instead.',
     {
       sessionId: z.string().min(1).describe("Session ID to close"),
     },
