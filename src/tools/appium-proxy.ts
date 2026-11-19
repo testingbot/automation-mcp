@@ -19,6 +19,7 @@ import path from "path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import logger from "../lib/logger.js";
+import { appiumAnnotations, type ToolAnnotations } from "../lib/annotations.js";
 import { handleMCPError } from "../lib/utils.js";
 import type { TestingBotConfig, ProxyClientLike, ProxyCallOptions } from "../lib/types.js";
 
@@ -276,7 +277,12 @@ export async function addAppiumProxyTools(
   const spawnFn = options.spawn ?? defaultSpawn;
   const { client, close } = await spawnFn(env);
 
-  let toolList: Array<{ name: string; description?: string; inputSchema?: unknown }>;
+  let toolList: Array<{
+    name: string;
+    description?: string;
+    inputSchema?: unknown;
+    annotations?: unknown;
+  }>;
   try {
     const result = await client.listTools();
     toolList = result.tools;
@@ -325,6 +331,7 @@ export async function addAppiumProxyTools(
     // Schema on the tool object so the ListTools handler can pick it up
     // verbatim. server-factory honors `inputSchema` when present.
     registered.inputSchema = inputSchema;
+    registered.annotations = appiumAnnotations(name, t.annotations as ToolAnnotations | undefined);
     tools[name] = registered;
   }
 

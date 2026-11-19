@@ -50,6 +50,7 @@ function makeFakeChild(): {
           {
             name: "appium_screenshot",
             description: "Take a screenshot",
+            annotations: { readOnlyHint: false, openWorldHint: false },
             inputSchema: { type: "object", properties: { sessionId: { type: "string" } } },
           },
         ],
@@ -89,6 +90,21 @@ describe("addAppiumProxyTools", () => {
     ]);
     expect(serverMock.tool).toHaveBeenCalledTimes(2);
     expect(fake.listToolsCalls.value).toBe(1);
+  });
+
+  it("keeps appium-mcp's annotations but marks every tool as reaching TestingBot", async () => {
+    const fake = makeFakeChild();
+    const handle = await addAppiumProxyTools(serverMock, config, {
+      spawn: async () => ({ client: fake.client, close: async () => {} }),
+    });
+    expect(handle.tools.appium_screenshot.annotations).toEqual({
+      readOnlyHint: false,
+      openWorldHint: true,
+    });
+    expect(handle.tools.appium_session_management.annotations).toMatchObject({
+      destructiveHint: true,
+      openWorldHint: true,
+    });
   });
 
   it("strips every credential env name from the child's environment", async () => {

@@ -85,7 +85,7 @@ export default function addSharedTools(server: any, sessions: SessionManager) {
   // ---------------------------------------------------------------------------
   tools.tb_screenshot = server.tool(
     "tb_screenshot",
-    "Capture a PNG screenshot of the active browser session. Returns a base64 image content block AND saves the PNG to disk, returning a clickable file:// link — many MCP clients (e.g. Claude Desktop) don't render tool-returned images inline, so the saved file is the reliable way for a human to view it. Pass `savePath` to control where it's written (a .png file path, or a directory); otherwise it goes to the OS temp dir.",
+    "Take a PNG screenshot of the current page in a browser session. Returns the image inline and saves it to disk with a clickable file:// link, because many MCP clients (e.g. Claude Desktop) don't show tool images inline. `savePath` sets where it is written (a .png path or a directory; default: the OS temp directory). Use it when a person needs to see the page or layout matters; to find elements or read content, tb_snapshot is cheaper.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       savePath: z
@@ -131,7 +131,7 @@ export default function addSharedTools(server: any, sessions: SessionManager) {
   // ---------------------------------------------------------------------------
   tools.tb_pressKey = server.tool(
     "tb_pressKey",
-    "Press a key (or chord) on the active browser session. Uses W3C key names: 'Enter', 'Tab', 'Escape', 'Control+A', 'Meta+Shift+Z', etc. Sent to the currently-focused element.",
+    "Press a key or key combination in a browser session, sent to the element that currently has focus (not to a selector). Use W3C key names such as 'Enter', 'Tab', 'Escape', 'ArrowDown', 'Control+A' or 'Meta+Shift+Z'. Use it for keyboard navigation, shortcuts and submitting forms; to type text into a field use tb_type, and to focus an element first use tb_click. May trigger navigation or other page actions. Returns a confirmation.",
     {
       sessionId: z.string().min(1).describe("Session ID from tb_openBrowser"),
       key: z.string().min(1).describe("Key name or chord"),
@@ -154,7 +154,7 @@ export default function addSharedTools(server: any, sessions: SessionManager) {
   // ---------------------------------------------------------------------------
   tools.tb_listSessions = server.tool(
     "tb_listSessions",
-    "List all active browser sessions managed by this server. Useful when you've lost track of a sessionId. (Mobile device sessions are NOT listed here — they live inside appium-mcp; use appium_session_management with action 'list'.)",
+    "List the browser sessions this server has open, with their IDs, capabilities, age, idle time and live-view links. Read-only. Use it to recover a lost `sessionId` or to find sessions to close with tb_closeBrowser. Native-app (Appium) sessions are not included; list those with appium_session_management action 'list'.",
     {},
     async () => {
       try {

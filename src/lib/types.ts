@@ -15,7 +15,12 @@ export interface ProxyCallOptions {
 
 export interface ProxyClientLike {
   listTools(): Promise<{
-    tools: Array<{ name: string; description?: string; inputSchema?: unknown }>;
+    tools: Array<{
+      name: string;
+      description?: string;
+      inputSchema?: unknown;
+      annotations?: unknown;
+    }>;
   }>;
   callTool(
     params: { name: string; arguments?: Record<string, unknown> },
